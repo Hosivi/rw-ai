@@ -1,0 +1,2 @@
+# Normalize to LF in the repo; rw-ai is cross-platform (Windows + Linux dev machines)
+* text=auto eol=lf
