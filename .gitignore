@@ -1,0 +1,6 @@
+node_modules/
+dist/
+coverage/
+
+# gentle-ai skill-registry cache (machine-local absolute paths)
+.atl/
