@@ -1,4 +1,10 @@
-import { spawn } from 'node:child_process';
+// cross-spawn instead of node:child_process: since Node's CVE-2024-27980
+// patch, spawn('pnpm', ..., { shell: false }) throws EINVAL synchronously on
+// Windows because pnpm/npx/docker-compose wrappers are .cmd shims. cross-spawn
+// resolves the shim itself and escapes each arg individually instead of
+// handing a whole command line to a shell, so args still reach the process
+// verbatim. Public API and Result semantics are unchanged.
+import spawn from 'cross-spawn';
 import { err, ok, type Result } from '../core/result.js';
 
 export type CommandOutput = {
@@ -37,9 +43,9 @@ export const runCommandRaw: CommandRunner = (command, args, opts) =>
     let child: ReturnType<typeof spawn>;
     try {
       // shell: false always — args passed as an array reach the process
-      // verbatim, the only quoting-safe way to handle Windows paths with spaces.
-      // spawn can also throw synchronously (e.g. EINVAL for .cmd shims on
-      // Windows since the CVE-2024-27980 patch), hence the try/catch.
+      // verbatim, the only quoting-safe way to handle Windows paths with
+      // spaces. The try/catch stays even with cross-spawn: spawn can still
+      // throw synchronously on invalid options.
       child = spawn(command, args, {
         cwd: opts.cwd,
         env: opts.env === undefined ? process.env : { ...process.env, ...opts.env },

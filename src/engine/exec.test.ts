@@ -27,6 +27,16 @@ describe('runCommand', () => {
     expect(error.kind).toBe('spawn-failed');
   });
 
+  // Regression guard for the cross-spawn swap: pnpm is a .cmd shim on
+  // Windows, which plain spawn(shell: false) rejects with a synchronous
+  // EINVAL since Node's CVE-2024-27980 patch. pnpm is a hard dev requirement
+  // of this repo, so the test may assume the binary exists.
+  it('runs .cmd shims like pnpm on Windows', async () => {
+    const output = unwrap(await runCommand('pnpm', ['--version'], { cwd }));
+    expect(output.exitCode).toBe(0);
+    expect(trimmedStdout(output)).toMatch(/^\d+\.\d+\.\d+/);
+  });
+
   it('passes env overrides to the child process', async () => {
     const output = unwrap(
       await runCommand('git', ['var', 'GIT_AUTHOR_IDENT'], {
