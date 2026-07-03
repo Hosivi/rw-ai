@@ -12,19 +12,13 @@
 
 ### Global (recomendado) — deja el comando `rw` disponible en cualquier carpeta
 
-Una sola línea en PowerShell (Windows):
+Una sola línea en PowerShell (Windows). Clona, compila e instala el binario `rw`:
 
 ```powershell
 irm https://raw.githubusercontent.com/Hosivi/rw-ai/main/install.ps1 | iex
 ```
 
-O directamente con npm (Windows, macOS o Linux):
-
-```bash
-npm install -g github:Hosivi/rw-ai
-```
-
-Cualquiera de las dos compila el proyecto e instala el binario `rw` en tu PATH. Abre una terminal **nueva** y verifica:
+Abre una terminal **nueva** y verifica:
 
 ```bash
 rw --version
@@ -32,15 +26,18 @@ rw --version
 
 > Si al escribir `rw` te dice que no lo reconoce, la carpeta de binarios globales de npm no está en tu PATH. Corre `npm config get prefix`, agrega esa carpeta al PATH y abre una terminal nueva.
 
-### Desde un clon local
+### Manual (Windows, macOS o Linux)
 
-Si ya tienes el repo clonado:
+Los tres pasos que hace el instalador, a mano:
 
 ```bash
 git clone https://github.com/Hosivi/rw-ai.git
 cd rw-ai
-npm install -g .        # compila e instala `rw` global
+npm install          # trae las dependencias y compila dist/
+npm install -g .     # deja el binario `rw` en tu PATH
 ```
+
+> `npm install` es necesario **antes** de `npm install -g .`: el build (`tsc`) corre en ese paso y necesita las dependencias de desarrollo.
 
 ### Para desarrollar el propio rw-ai
 
