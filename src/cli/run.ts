@@ -16,6 +16,7 @@ import { runClaim, runInit, runRoles, runRelease, runWhoami } from './commands/i
 import { runFinish } from './commands/lifecycle.js';
 import { runScaffold } from './commands/scaffold.js';
 import { runAddSession, runArchive } from './commands/sessions.js';
+import { runTokens } from './commands/tokens.js';
 import { printLines } from './output.js';
 import { readVersion } from './version.js';
 
@@ -35,6 +36,8 @@ const OPTIONS = {
   stacks: { type: 'string' },
   db: { type: 'string' },
   cwd: { type: 'string' },
+  model: { type: 'string' },
+  online: { type: 'boolean' },
   claim: { type: 'boolean' },
   force: { type: 'boolean' },
   version: { type: 'boolean', short: 'v' },
@@ -67,6 +70,7 @@ const USAGE: readonly string[] = [
   '  archive <id>                   Archiva una sesión',
   '  check                          Analiza la integración y detecta conflictos/invasiones',
   '  sessions [--cwd <ruta>] [--claim]   Lista los jobs de Claude Code de la máquina',
+  '  tokens [rutas...] [--model <id>] [--online]   Estima tokens y costo del contenido',
   '',
   'Opciones globales:',
   '  -v, --version                  Muestra la versión',
@@ -238,6 +242,16 @@ const route = async (argv: readonly string[], deps: CliDeps): Promise<CommandRes
       return runCheck(deps);
     case 'sessions':
       return runSessions({ cwd: values.cwd, claim: values.claim === true }, deps);
+    case 'tokens':
+      // Positionals after the command are the paths to weigh; flags carry the rest.
+      return runTokens(
+        {
+          paths: positionals.slice(1),
+          ...(values.model !== undefined ? { model: values.model } : {}),
+          ...(values.online === true ? { online: true } : {}),
+        },
+        deps,
+      );
     default:
       return usageError(`Comando desconocido: ${command}`);
   }

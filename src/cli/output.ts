@@ -105,6 +105,52 @@ export const formatClaudeSessions = (sessions: readonly ClaudeSession[]): string
   return [header, separator, ...rows].join('\n');
 };
 
+// One file's estimated (or exact) token count. path is absolute so the summary is
+// unambiguous when files come from several directories.
+export type FileTokens = {
+  readonly path: string;
+  readonly tokens: number;
+};
+
+// The full result of `rw tokens`: per-file counts, the total, the model the cost is
+// priced against, the input cost in USD (undefined = the model has no price), and
+// whether the count was an offline estimate or an exact online count.
+export type TokensSummary = {
+  readonly files: readonly FileTokens[];
+  readonly totalTokens: number;
+  readonly model: string;
+  readonly costUsd: number | undefined;
+  readonly mode: 'offline' | 'online';
+};
+
+// USD with 6 decimals via toFixed: token costs are often fractions of a cent, and
+// toFixed is locale-independent so the output stays deterministic across machines
+// (unlike Intl.NumberFormat, which is env-sensitive).
+const formatUsd = (usd: number): string => `US$ ${usd.toFixed(6)}`;
+
+// The Spanish (tuteo) terminal summary for `rw tokens`. Pure and deterministic:
+// per-file counts, the total, the model, the input cost (or an explicit "sin
+// precio" pointing at pricing.json), and a note making the OFFLINE case read as an
+// estimate — never as an authoritative count.
+export const formatTokens = (summary: TokensSummary): string => {
+  const lines = [`Archivos analizados: ${summary.files.length}`];
+  for (const file of summary.files) {
+    lines.push(`- ${file.path}: ${file.tokens} tokens`);
+  }
+  lines.push(`Total: ${summary.totalTokens} tokens`, `Modelo: ${summary.model}`);
+  lines.push(
+    summary.costUsd === undefined
+      ? 'Costo estimado de entrada: sin precio (edita pricing.json)'
+      : `Costo estimado de entrada: ${formatUsd(summary.costUsd)}`,
+  );
+  lines.push(
+    summary.mode === 'offline'
+      ? 'Nota: es una ESTIMACIÓN sin conexión (~4 caracteres por token). Usa --online para un conteo exacto.'
+      : 'Nota: conteo exacto obtenido de la API de conteo de tokens de Anthropic.',
+  );
+  return lines.join('\n');
+};
+
 // Turns a context failure into an actionable Spanish message: each kind names the
 // next step the user should take, not just what went wrong.
 export const formatContextError = (error: CliContextError): string => {

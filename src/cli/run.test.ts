@@ -161,6 +161,24 @@ describe('runCli', () => {
     expect(lines.join('\n')).toContain('No hay sesiones de Claude Code');
   });
 
+  it('lists the tokens command in --help', async () => {
+    const { lines, deps } = capture();
+    const code = await runCli(['--help'], deps);
+    expect(code).toBe(0);
+    expect(lines.join('\n')).toContain('tokens');
+  });
+
+  it('routes tokens to its handler (missing pricing.json outside a repo)', async () => {
+    // Outside a repo the handler falls back to cwd/pricing.json, which is absent →
+    // exit 1 naming pricing.json, proving the command was routed (not unknown).
+    const { lines, deps } = capture({ cwd: '/anywhere', run: gitNotARepo, runRaw: gitNotARepo });
+    const code = await runCli(['tokens', 'somefile.txt'], deps);
+    expect(code).toBe(1);
+    const text = lines.join('\n');
+    expect(text).not.toContain('Comando desconocido');
+    expect(text).toContain('pricing.json');
+  });
+
   it('routes a real command to its handler', async () => {
     const { lines, deps } = capture({ cwd: '/anywhere', run: gitNotARepo, runRaw: gitNotARepo });
     const code = await runCli(['roles'], deps);

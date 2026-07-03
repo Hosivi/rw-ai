@@ -10,11 +10,46 @@ import {
   formatIntegration,
   formatRoles,
   formatRunbook,
+  formatTokens,
   printLines,
+  type TokensSummary,
 } from './output.js';
 
 const EXPIRES = '2026-07-02T18:00:00.000Z';
 const CLAIMED_AT = '2026-07-02T12:00:00.000Z';
+
+describe('formatTokens', () => {
+  const base: TokensSummary = {
+    files: [
+      { path: '/repo/a.ts', tokens: 100 },
+      { path: '/repo/b.ts', tokens: 50 },
+    ],
+    totalTokens: 150,
+    model: 'claude-sonnet-5',
+    costUsd: 0.00045,
+    mode: 'offline',
+  };
+
+  it('lists per-file counts, the total, the priced cost, and the offline estimate note', () => {
+    const text = formatTokens(base);
+    expect(text).toContain('/repo/a.ts: 100 tokens');
+    expect(text).toContain('Total: 150 tokens');
+    expect(text).toContain('Modelo: claude-sonnet-5');
+    expect(text).toContain('US$ 0.000450');
+    expect(text).toContain('ESTIMACIÓN');
+  });
+
+  it('reports "sin precio" when the model has no cost', () => {
+    const text = formatTokens({ ...base, costUsd: undefined });
+    expect(text).toContain('sin precio (edita pricing.json)');
+  });
+
+  it('drops the estimate note in online mode', () => {
+    const text = formatTokens({ ...base, mode: 'online' });
+    expect(text).not.toContain('ESTIMACIÓN');
+    expect(text).toContain('conteo exacto');
+  });
+});
 
 describe('formatRunbook', () => {
   const runbook: RunbookResult = {
