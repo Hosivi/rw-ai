@@ -304,6 +304,71 @@ export const releaseRole = async (
   });
 };
 
+// Admin force-free: releases a role's claim WITHOUT a token, under the same
+// advisory lock as claim/release. Its reason for existing is archiveSession:
+// once a session is archived it drops out of activeSessions, so validateRole,
+// whoami and releaseRole can no longer see or free its claim — it would be
+// stranded forever. `config` is part of the documented admin signature but the
+// role is freed by raw key ON PURPOSE, since validateRole would reject the
+// now-archived role we are trying to release. A missing claims.json is a no-op.
+export const forceFreeRole = async (
+  config: AgentsConfig,
+  boardDir: string,
+  role: string,
+  now: Date,
+): Promise<Result<{ readonly released: boolean }, IdentityError>> => {
+  void config;
+  const filePath = claimsFilePath(boardDir);
+  // Nothing to free before the file exists; skip even acquiring the lock (its
+  // directory may not exist yet on a not-yet-configured repo).
+  try {
+    await fs.access(filePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return ok({ released: false });
+    }
+    return err({ kind: 'io', message: `could not access ${filePath}: ${errorMessage(error)}`, cause: error });
+  }
+  return withClaimsLock<{ readonly released: boolean }>(boardDir, now, async () => {
+    let raw: string;
+    try {
+      raw = await fs.readFile(filePath, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return ok({ released: false });
+      }
+      return err({ kind: 'io', message: `could not read ${filePath}: ${errorMessage(error)}`, cause: error });
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (error) {
+      return err({
+        kind: 'invalid-json',
+        message: `claims.json is not valid JSON: ${errorMessage(error)}`,
+        cause: error,
+      });
+    }
+    const claims = parseClaimsFile(parsed);
+    if (!claims.ok) {
+      return err({ kind: 'invalid-claims', message: claims.error.message, cause: claims.error });
+    }
+    const current = claims.value.claims[role];
+    // Absent or already free: no rewrite, so file watchers do not churn.
+    if (current === undefined || current.status === 'free') {
+      return ok({ released: false });
+    }
+    const written = await writeClaims(boardDir, {
+      version: 1,
+      claims: { ...claims.value.claims, [role]: { status: 'free' } },
+    });
+    if (!written.ok) {
+      return written;
+    }
+    return ok({ released: true });
+  });
+};
+
 export type WhoAmI = {
   readonly role: string;
   readonly claim: Claim;
