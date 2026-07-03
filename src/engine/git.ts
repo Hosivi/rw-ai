@@ -89,6 +89,17 @@ export type Git = {
   readonly currentBranch: () => Promise<Result<string, GitError>>;
   readonly listWorktrees: () => Promise<Result<WorktreeInfo[], GitError>>;
   readonly addWorktree: (worktreePath: string, branch: string) => Promise<Result<void, GitError>>;
+  // The following move THIS working tree's HEAD, so lifecycle only calls them on
+  // a session worktree (via createGit(worktreePath, ...)), never the main copy.
+  readonly switchBranch: (name: string) => Promise<Result<void, GitError>>;
+  readonly switchNewBranch: (name: string, from: string) => Promise<Result<void, GitError>>;
+  readonly mergeNoFf: (
+    branch: string,
+    message?: string,
+  ) => Promise<Result<{ status: 'merged' | 'conflict' }, GitError>>;
+  readonly mergeAbort: () => Promise<Result<void, GitError>>;
+  readonly deleteBranch: (name: string) => Promise<Result<void, GitError>>;
+  readonly statusPorcelain: () => Promise<Result<string, GitError>>;
 };
 
 export const createGit = (
@@ -147,5 +158,75 @@ export const createGit = (
     return result.ok ? ok(undefined) : result;
   };
 
-  return { version, toplevel, branchExists, createBranch, currentBranch, listWorktrees, addWorktree };
+  const switchBranch: Git['switchBranch'] = async (name) => {
+    // `git switch` refuses a branch already checked out in another worktree; the
+    // CommandError is surfaced as-is so the caller can explain the contention.
+    const result = await inRepo(['switch', name]);
+    return result.ok ? ok(undefined) : result;
+  };
+
+  const switchNewBranch: Git['switchNewBranch'] = async (name, from) => {
+    const result = await inRepo(['switch', '-c', name, from]);
+    return result.ok ? ok(undefined) : result;
+  };
+
+  const mergeNoFf: Git['mergeNoFf'] = async (branch, message) => {
+    const args =
+      message === undefined
+        ? ['merge', '--no-ff', branch]
+        : ['merge', '--no-ff', '-m', message, branch];
+    // runRaw, not run: a merge conflict exits non-zero but is a valid outcome,
+    // not a spawn/usage failure — only inspecting the exit code tells them apart.
+    const result = await runRaw('git', args, { cwd: repoRoot });
+    if (!result.ok) {
+      return result;
+    }
+    const output = result.value;
+    // Detect by exit code, never by message text: git output is gettext-
+    // translated by locale, so matching the English word "CONFLICT" would
+    // misclassify a real conflict under another locale. `git merge` exits 0 on
+    // success (incl. "Already up to date"), exactly 1 when it stops on
+    // conflicts, and other non-zero codes (e.g. 128) on genuine errors such as
+    // unrelated histories or a bad ref.
+    if (output.exitCode === 0) {
+      return ok({ status: 'merged' });
+    }
+    if (output.exitCode === 1) {
+      return ok({ status: 'conflict' });
+    }
+    return err({ kind: 'non-zero-exit', output });
+  };
+
+  const mergeAbort: Git['mergeAbort'] = async () => {
+    const result = await inRepo(['merge', '--abort']);
+    return result.ok ? ok(undefined) : result;
+  };
+
+  const deleteBranch: Git['deleteBranch'] = async (name) => {
+    // -D force-deletes at the ref level (safe from repoRoot as long as the
+    // branch is not checked out in any worktree); merged-state is not required.
+    const result = await inRepo(['branch', '-D', name]);
+    return result.ok ? ok(undefined) : result;
+  };
+
+  const statusPorcelain: Git['statusPorcelain'] = async () => {
+    const result = await inRepo(['status', '--porcelain']);
+    return result.ok ? ok(trimmedStdout(result.value)) : result;
+  };
+
+  return {
+    version,
+    toplevel,
+    branchExists,
+    createBranch,
+    currentBranch,
+    listWorktrees,
+    addWorktree,
+    switchBranch,
+    switchNewBranch,
+    mergeNoFf,
+    mergeAbort,
+    deleteBranch,
+    statusPorcelain,
+  };
 };

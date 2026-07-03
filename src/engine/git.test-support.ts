@@ -27,8 +27,9 @@ export const removeDirRobust = (target: string): Promise<void> =>
   fs.rm(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 
 // Test-only helper: throwing on failure is intentional — broken repo setup
-// must fail the test that relied on it.
-const git = async (cwd: string, args: string[]): Promise<void> => {
+// must fail the test that relied on it. Exported so specs can drive one-off git
+// commands without re-declaring their own runner.
+export const runGitOrThrow = async (cwd: string, args: string[]): Promise<void> => {
   const result = await runCommand('git', args, { cwd });
   if (!result.ok) {
     throw new Error(`git ${args.join(' ')} failed: ${JSON.stringify(result.error)}`);
@@ -40,15 +41,15 @@ export const createTempRepo = async (): Promise<TempRepo> => {
   // realpath because os.tmpdir() can be an 8.3 short path on Windows and a
   // symlink on macOS; git prints real paths, so comparisons need the real root.
   const root = await fs.realpath(dir);
-  await git(root, ['init', '-b', 'main']);
+  await runGitOrThrow(root, ['init', '-b', 'main']);
   // Local-only identity and no signing: the suite must not depend on (or be
   // broken by) the developer's global git config.
-  await git(root, ['config', 'user.email', 'tests@rw-ai.invalid']);
-  await git(root, ['config', 'user.name', 'rw-ai tests']);
-  await git(root, ['config', 'commit.gpgsign', 'false']);
+  await runGitOrThrow(root, ['config', 'user.email', 'tests@rw-ai.invalid']);
+  await runGitOrThrow(root, ['config', 'user.name', 'rw-ai tests']);
+  await runGitOrThrow(root, ['config', 'commit.gpgsign', 'false']);
   await fs.writeFile(path.join(root, 'README.md'), '# temp repo\n');
-  await git(root, ['add', 'README.md']);
-  await git(root, ['commit', '-m', 'chore: initial commit']);
+  await runGitOrThrow(root, ['add', 'README.md']);
+  await runGitOrThrow(root, ['commit', '-m', 'chore: initial commit']);
 
   const cleanup = async (): Promise<void> => {
     // Detach linked worktrees first (best-effort, results ignored): git holds
