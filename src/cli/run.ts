@@ -82,8 +82,9 @@ const parseAgent = (raw: string | undefined): AgentKind | undefined | 'invalid' 
 };
 
 // --areas is a comma-separated glob list; blanks are dropped so a trailing comma
-// never yields an empty area.
-const parseAreas = (raw: string | undefined): readonly string[] | undefined =>
+// never yields an empty area. Exported so the blank-dropping edge is unit-tested
+// without provisioning a repo.
+export const parseAreas = (raw: string | undefined): readonly string[] | undefined =>
   raw === undefined
     ? undefined
     : raw

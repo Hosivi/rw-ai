@@ -26,8 +26,9 @@ const describeIntegratorError = (error: IntegratorError): string => {
 
 // A blocking state for the pre-merge gate: any simulated conflict, or any file a
 // session wrote outside its lane. Shared-zone touches and plain overlaps are
-// informational, not blocking.
-const isBlocking = (analysis: IntegrationAnalysis): boolean =>
+// informational, not blocking. Exported so the gate contract CI relies on is
+// unit-tested directly, not only through the full runCheck integration.
+export const isBlocking = (analysis: IntegrationAnalysis): boolean =>
   analysis.invasions.length > 0 ||
   analysis.simulatedMerges.some((merge) => merge.status === 'conflict');
 

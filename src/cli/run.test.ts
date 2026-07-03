@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { err } from '../core/result.js';
 import type { CommandRunner } from '../engine/exec.js';
 import type { CliDeps } from './command.js';
-import { runCli } from './run.js';
+import { parseAreas, runCli } from './run.js';
 
 const NOW = new Date('2026-07-02T12:00:00.000Z');
 
@@ -89,6 +89,23 @@ describe('runCli', () => {
     expect(lines.join('\n')).toContain('Agente inválido');
   });
 
+  // The `--ttl=<v>` form forces the value even for `-5`, which parseArgs would
+  // otherwise read as a flag — so all three reach the TTL validation branch.
+  it.each(['0', '-5', 'abc'])('exits 2 for an invalid --ttl value %s', async (ttl) => {
+    const { lines, deps } = capture();
+    const code = await runCli(['claim', 's1', `--ttl=${ttl}`], deps);
+    expect(code).toBe(2);
+    expect(lines.join('\n')).toContain('TTL inválido');
+  });
+
+  it('exits 2 when a string option is missing its argument', async () => {
+    // parseArgs throws for `--role` with no value; runCli maps it to a usage error.
+    const { lines, deps } = capture();
+    const code = await runCli(['init', '--role'], deps);
+    expect(code).toBe(2);
+    expect(lines.join('\n')).toContain('Uso: rw');
+  });
+
   it('routes a real command to its handler', async () => {
     const { lines, deps } = capture({ cwd: '/anywhere', run: gitNotARepo, runRaw: gitNotARepo });
     const code = await runCli(['roles'], deps);
@@ -97,5 +114,19 @@ describe('runCli', () => {
     const text = lines.join('\n');
     expect(text).not.toContain('Comando desconocido');
     expect(text.toLowerCase()).toContain('git');
+  });
+});
+
+describe('parseAreas', () => {
+  it('splits a comma list and drops blank entries from stray commas', () => {
+    expect(parseAreas('a/**,,b/**')).toEqual(['a/**', 'b/**']);
+  });
+
+  it('trims surrounding whitespace around each glob', () => {
+    expect(parseAreas(' a/** , b/** ')).toEqual(['a/**', 'b/**']);
+  });
+
+  it('returns undefined when no --areas was given', () => {
+    expect(parseAreas(undefined)).toBeUndefined();
   });
 });
