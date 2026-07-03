@@ -1,0 +1,7 @@
+{
+  "_comment": "IMPORTANTE: estos precios son SOLO indicativos y NO son oficiales. Debes verificarlos y actualizarlos con la lista de precios vigente de Anthropic (https://www.anthropic.com/pricing) antes de confiar en los montos. Los valores están en dólares (USD) por cada 1.000.000 de tokens.",
+  "claude-opus-4-8": { "inputPerMTok": 15, "outputPerMTok": 75 },
+  "claude-sonnet-5": { "inputPerMTok": 3, "outputPerMTok": 15 },
+  "claude-haiku-4-5": { "inputPerMTok": 1, "outputPerMTok": 5 },
+  "claude-fable-5": { "inputPerMTok": 1, "outputPerMTok": 5 }
+}
