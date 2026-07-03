@@ -1,0 +1,31 @@
+name: CI
+
+# Runs the type check and the full test suite on every push and pull request.
+# CI=true activates vitest's forbidOnly, so a stray `.only` fails the build
+# instead of silently hiding the rest of the suite.
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # pnpm/action-setup reads the pinned version from package.json's
+      # packageManager field, so the CI toolchain matches local development.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm typecheck
+
+      - run: pnpm test
+        env:
+          CI: 'true'
