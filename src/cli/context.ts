@@ -14,7 +14,7 @@ export type CliContext = {
 };
 
 // Kinds map one-to-one onto an actionable next step the CLI can print:
-// 'not-a-repo' means run inside a repo, 'config-not-found' invites 'rw configure',
+// 'not-a-repo' means run inside a repo, 'config-not-found' invites 'rw scaffold',
 // 'config-invalid' points at a file to fix (issues carries the violations), 'io'
 // is a filesystem failure that is none of those.
 export type CliContextError = {

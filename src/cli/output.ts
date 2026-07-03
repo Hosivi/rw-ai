@@ -158,7 +158,7 @@ export const formatContextError = (error: CliContextError): string => {
     case 'not-a-repo':
       return 'No estás dentro de un repositorio git. Ejecuta rw dentro de un repositorio con git inicializado.';
     case 'config-not-found':
-      return "No se encontró agents.config.json. Ejecuta 'rw configure' para generarlo.";
+      return "No se encontró agents.config.json. Ejecuta 'rw scaffold' para generarlo (detecta tu stack) y luego 'rw configure' para provisionar el repo.";
     case 'config-invalid': {
       const issues = error.issues ?? [];
       if (issues.length === 0) {

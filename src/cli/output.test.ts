@@ -171,9 +171,9 @@ describe('formatIntegration', () => {
 });
 
 describe('formatContextError', () => {
-  it('suggests rw configure for a missing config', () => {
+  it('suggests rw scaffold for a missing config', () => {
     const error: CliContextError = { kind: 'config-not-found', message: 'agents.config.json not found' };
-    expect(formatContextError(error)).toContain('rw configure');
+    expect(formatContextError(error)).toContain('rw scaffold');
   });
 
   it('explains the git-repo requirement', () => {
