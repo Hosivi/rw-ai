@@ -81,10 +81,55 @@ export const parseWorktreeList = (stdout: string): WorktreeInfo[] => {
   return entries;
 };
 
+// `git merge-tree --write-tree` classifies a merge WITHOUT touching a working
+// tree: clean, or conflict with the offending paths (from --name-only).
+export type MergeTreeResult =
+  | { readonly status: 'clean' }
+  | { readonly status: 'conflict'; readonly files: readonly string[] };
+
+// The name-only conflict block on the installed git (2.53) is: line 0 is the
+// resulting tree OID, then the conflicted file names, then a BLANK line, then
+// git's informational messages ("Auto-merging …", "CONFLICT (…): …"). Confirmed
+// identical for content, add/add, and file/directory conflicts (the latter
+// renames the file side, e.g. `foo` -> `foo~a`). The spec's suggested "collect
+// every remaining non-empty line" would wrongly capture those messages as file
+// names, so we stop at the first blank line. Two extra guards make this robust:
+// leading blank lines right after the OID are tolerated (in case a future git
+// inserts one), and an `Auto-merging `/`CONFLICT (` prefix also terminates the
+// name block in case a future git omits the blank separator.
+export const parseMergeTreeConflicts = (stdout: string): string[] => {
+  const lines = stdout.split(/\r?\n/);
+  const files: string[] = [];
+  let index = 1; // skip the resulting-tree OID on line 0
+  while (index < lines.length && lines[index] === '') {
+    index += 1;
+  }
+  for (; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (
+      line === undefined ||
+      line === '' || // blank line separates conflicted names from informational text
+      line.startsWith('Auto-merging ') ||
+      line.startsWith('CONFLICT (')
+    ) {
+      break;
+    }
+    files.push(line);
+  }
+  return files;
+};
+
 export type Git = {
   readonly version: () => Promise<Result<GitVersion, GitError>>;
   readonly toplevel: () => Promise<Result<string, GitError>>;
   readonly branchExists: (name: string) => Promise<Result<boolean, GitError>>;
+  // Read-only integrator primitives: inspect what a branch changed and simulate
+  // a merge, both without mutating any working tree.
+  readonly changedFiles: (base: string, branch: string) => Promise<Result<string[], GitError>>;
+  readonly mergeTree: (
+    branchA: string,
+    branchB: string,
+  ) => Promise<Result<MergeTreeResult, GitError>>;
   readonly createBranch: (name: string, from: string) => Promise<Result<void, GitError>>;
   readonly currentBranch: () => Promise<Result<string, GitError>>;
   readonly listWorktrees: () => Promise<Result<WorktreeInfo[], GitError>>;
@@ -135,6 +180,55 @@ export const createGit = (
       return ok(false);
     }
     return err({ kind: 'non-zero-exit', output: result.value });
+  };
+
+  const changedFiles: Git['changedFiles'] = async (base, branch) => {
+    // THREE dots: changes on `branch` since it diverged from `base` (relative to
+    // their merge-base), which is exactly a session's contribution. Strict `run`:
+    // a bad ref here is a genuine error, not data.
+    // -c core.quotePath=false: with git's default (quotePath=true) a non-ASCII
+    // path comes back C-escaped AND double-quoted (e.g. `"caf\303\251.ts"`),
+    // which would never match a raw glob string and would misclassify an in-area
+    // file as an invasion. Force raw UTF-8 output instead.
+    const result = await inRepo([
+      '-c',
+      'core.quotePath=false',
+      'diff',
+      '--name-only',
+      `${base}...${branch}`,
+    ]);
+    if (!result.ok) {
+      return result;
+    }
+    // git prints one forward-slash path per line; drop the trailing-newline
+    // empty and any blank lines. Paths are NOT trimmed so names with spaces stay
+    // intact.
+    const files = result.value.stdout.split(/\r?\n/).filter((line) => line.length > 0);
+    return ok(files);
+  };
+
+  const mergeTree: Git['mergeTree'] = async (branchA, branchB) => {
+    // runRaw, not run: a conflict exits 1 but is a valid outcome. Classify by
+    // EXIT CODE only — git's text is gettext-translated, so matching "CONFLICT"
+    // would misclassify under another locale. --write-tree computes the merge in
+    // the object store (no working tree), --name-only trims the conflict block to
+    // bare file names. Exit 0 = clean, 1 = conflicts, anything else = real error.
+    const result = await runRaw(
+      'git',
+      ['merge-tree', '--write-tree', '--name-only', branchA, branchB],
+      { cwd: repoRoot },
+    );
+    if (!result.ok) {
+      return result;
+    }
+    const output = result.value;
+    if (output.exitCode === 0) {
+      return ok({ status: 'clean' });
+    }
+    if (output.exitCode === 1) {
+      return ok({ status: 'conflict', files: parseMergeTreeConflicts(output.stdout) });
+    }
+    return err({ kind: 'non-zero-exit', output });
   };
 
   const createBranch: Git['createBranch'] = async (name, from) => {
@@ -218,6 +312,8 @@ export const createGit = (
     version,
     toplevel,
     branchExists,
+    changedFiles,
+    mergeTree,
     createBranch,
     currentBranch,
     listWorktrees,
