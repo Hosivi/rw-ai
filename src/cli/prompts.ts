@@ -37,7 +37,7 @@ export const selectRole = async (
     return err(nonInteractive('elegir un rol'));
   }
   const selected = await clack.select<string>({
-    message: 'Elegí un rol para reclamar',
+    message: 'Elige un rol para reclamar',
     options: roles.map((role) => ({
       value: role.role,
       label: `${role.role} — ${roleStatusLabel(role)}`,
