@@ -8,27 +8,49 @@
 - `git >=2.38` (usa `git merge-tree` para simular integraciones sin tocar tu working tree)
 - `pnpm` (gestor de paquetes del proyecto)
 
-## Instalación para pruebas locales
+## Instalación
 
-Clona el repositorio y compílalo:
+### Global (recomendado) — deja el comando `rw` disponible en cualquier carpeta
+
+Una sola línea en PowerShell (Windows):
+
+```powershell
+irm https://raw.githubusercontent.com/Hosivi/rw-ai/main/install.ps1 | iex
+```
+
+O directamente con npm (Windows, macOS o Linux):
+
+```bash
+npm install -g github:Hosivi/rw-ai
+```
+
+Cualquiera de las dos compila el proyecto e instala el binario `rw` en tu PATH. Abre una terminal **nueva** y verifica:
+
+```bash
+rw --version
+```
+
+> Si al escribir `rw` te dice que no lo reconoce, la carpeta de binarios globales de npm no está en tu PATH. Corre `npm config get prefix`, agrega esa carpeta al PATH y abre una terminal nueva.
+
+### Desde un clon local
+
+Si ya tienes el repo clonado:
+
+```bash
+git clone https://github.com/Hosivi/rw-ai.git
+cd rw-ai
+npm install -g .        # compila e instala `rw` global
+```
+
+### Para desarrollar el propio rw-ai
 
 ```bash
 pnpm install
 pnpm build
+node dist/cli.js <comando>   # o `pnpm link --global` para tener `rw`
 ```
 
-A partir de ahí tienes dos formas de correr la CLI:
-
-```bash
-# Opción A: invocarla directamente desde el build
-node dist/cli.js <comando>
-
-# Opción B: enlazarla global para tener el binario `rw` en tu PATH
-pnpm link --global
-rw <comando>
-```
-
-Los ejemplos de abajo usan `rw`; si prefieres no enlazar, reemplaza `rw` por `node dist/cli.js`.
+Los ejemplos de abajo usan `rw`.
 
 ## Flujo de principio a fin
 
