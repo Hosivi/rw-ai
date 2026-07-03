@@ -1,6 +1,7 @@
 {
   "name": "rw-ai",
   "version": "0.1.0",
+  "description": "Configure a repository so N parallel AI agent sessions work without git, port, or database conflicts.",
   "type": "module",
   "bin": {
     "rw": "./dist/cli.js"
@@ -9,11 +10,16 @@
     "node": ">=20"
   },
   "packageManager": "pnpm@10.30.3",
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepack": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
     "@clack/prompts": "^1.6.0",
