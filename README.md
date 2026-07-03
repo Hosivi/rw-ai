@@ -101,8 +101,11 @@ Los ejemplos de abajo usan `rw`.
 | `rw archive <id>` | Archiva una sesión |
 | `rw check` | Analiza la integración y detecta conflictos/invasiones |
 | `rw sessions` | Lista los jobs de Claude Code de la máquina (el store en `~/.claude/jobs`, distinto de las sesiones git de rw) |
+| `rw tokens [rutas...]` | Estima tokens y costo del contenido (`--model <id>`, `--online` para conteo exacto) |
 
 Opciones globales: `-v`/`--version` muestra la versión, `-h`/`--help` muestra la ayuda completa.
+
+> **`pricing.json` es editable.** `rw tokens` lee los precios por modelo desde `pricing.json` (USD por cada 1.000.000 de tokens). Los valores que trae el paquete son **solo indicativos**: debes verificarlos y actualizarlos contra la lista de precios vigente de Anthropic antes de confiar en los montos. Sin conexión el conteo es una **estimación** (~4 caracteres por token); usa `--online` con `ANTHROPIC_API_KEY` para un conteo exacto vía la API de Anthropic.
 
 ### `rw scaffold` en detalle
 
