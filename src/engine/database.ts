@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import type { AgentsConfig, DbStrategy } from '../contract/schema.js';
+import { DB_NAME_PATTERN, type AgentsConfig, type DbStrategy } from '../contract/schema.js';
 import { assertNever } from '../core/assert.js';
 import { err, ok, type Result } from '../core/result.js';
 import { runCommand, trimmedStdout, type CommandError, type CommandRunner } from './exec.js';
@@ -206,10 +206,9 @@ export type DatabaseEnsureError = {
   readonly sessionId?: string;
 };
 
-// Valid unquoted-safe Postgres identifier: lowercase start, [a-z0-9_], max 63
-// bytes. Anything else is rejected outright — see the security guard below.
-const DB_NAME_PATTERN = /^[a-z_][a-z0-9_]{0,62}$/;
-
+// DB_NAME_PATTERN is imported from the contract schema (single source of truth):
+// the schema now rejects an invalid db.name at parse time, and the guard below
+// keeps it as defense-in-depth for hand-built configs that bypass the schema.
 const existsSql = (dbName: string): string =>
   `SELECT 1 FROM pg_database WHERE datname='${dbName}'`;
 

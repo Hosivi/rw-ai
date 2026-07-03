@@ -99,6 +99,19 @@ describe('agentsConfigSchema', () => {
     expect(error.issues.join('\n')).toContain('duplicate port: 8081');
   });
 
+  it('rejects a session db.name that is not a safe postgres identifier', () => {
+    const raw = nodeConfig();
+    raw.sessions[0]!.db.name = 'Demo App';
+    const error = unwrapErr(parseAgentsConfig(raw));
+    expect(error.issues.join('\n')).toContain('safe lowercase postgres identifier');
+  });
+
+  it('accepts a valid lowercase session db.name', () => {
+    const raw = nodeConfig();
+    raw.sessions[0]!.db.name = 'demo_s1';
+    expect(parseAgentsConfig(raw).ok).toBe(true);
+  });
+
   it('rejects e2e enabled without framework', () => {
     const raw = nodeConfig();
     raw.sessions[0]!.platforms.mobile!.e2e = { enabled: true };

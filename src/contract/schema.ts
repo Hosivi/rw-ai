@@ -73,6 +73,12 @@ export type Ports = z.infer<typeof portsSchema>;
 const sessionIdPattern = /^s[1-9][0-9]*$/;
 export const sessionIdSchema = z.string().regex(sessionIdPattern);
 
+// A Postgres identifier safe to use UNQUOTED in SQL: lowercase start, [a-z0-9_],
+// max 63 bytes. Enforced HERE (schema layer) so a bad db.name fails config
+// parsing fail-fast, instead of only tripping the defense-in-depth guard in
+// database.ts at configure time. database.ts imports this exact pattern.
+export const DB_NAME_PATTERN = /^[a-z_][a-z0-9_]{0,62}$/;
+
 const isAbsolutePathLike = (value: string): boolean =>
   value.startsWith('/') || value.startsWith('\\') || /^[A-Za-z]:/.test(value);
 
@@ -90,7 +96,14 @@ export const sessionSchema = z.object({
   status: z.enum(['active', 'archived']),
   areas: z.array(z.string().min(1)).min(1),
   ports: portsSchema.optional(),
-  db: z.object({ name: z.string().min(1) }).optional(),
+  db: z
+    .object({
+      name: z
+        .string()
+        .min(1)
+        .regex(DB_NAME_PATTERN, 'db.name must be a safe lowercase postgres identifier'),
+    })
+    .optional(),
   platforms: sessionPlatformsSchema.default({}),
 });
 export type Session = z.infer<typeof sessionSchema>;
