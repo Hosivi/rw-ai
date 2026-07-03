@@ -107,6 +107,42 @@ describe('runCli', () => {
     expect(lines.join('\n')).toContain('Uso: rw');
   });
 
+  it('lists the scaffold command in --help', async () => {
+    const { lines, deps } = capture();
+    const code = await runCli(['--help'], deps);
+    expect(code).toBe(0);
+    expect(lines.join('\n')).toContain('scaffold');
+  });
+
+  it.each(['0', '-1', 'abc'])('exits 2 for an invalid --sessions value %s', async (sessions) => {
+    const { lines, deps } = capture();
+    const code = await runCli(['scaffold', `--sessions=${sessions}`], deps);
+    expect(code).toBe(2);
+    expect(lines.join('\n')).toContain('Sesiones inválidas');
+  });
+
+  it('exits 2 for an unknown --stacks entry', async () => {
+    const { lines, deps } = capture();
+    const code = await runCli(['scaffold', '--stacks', 'node,rust'], deps);
+    expect(code).toBe(2);
+    expect(lines.join('\n')).toContain('Stacks inválidos');
+  });
+
+  it('exits 2 for an invalid --db strategy', async () => {
+    const { lines, deps } = capture();
+    const code = await runCli(['scaffold', '--db', 'mongo'], deps);
+    expect(code).toBe(2);
+    expect(lines.join('\n')).toContain('Estrategia de base de datos inválida');
+  });
+
+  it('routes scaffold to its handler (context error outside a repo)', async () => {
+    const { lines, deps } = capture({ cwd: '/anywhere', run: gitNotARepo, runRaw: gitNotARepo });
+    const code = await runCli(['scaffold'], deps);
+    expect(code).toBe(1);
+    expect(lines.join('\n')).not.toContain('Comando desconocido');
+    expect(lines.join('\n').toLowerCase()).toContain('git');
+  });
+
   it('routes a real command to its handler', async () => {
     const { lines, deps } = capture({ cwd: '/anywhere', run: gitNotARepo, runRaw: gitNotARepo });
     const code = await runCli(['roles'], deps);

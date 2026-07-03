@@ -49,6 +49,36 @@ export const selectRole = async (
   return ok(selected);
 };
 
+// Asks how many sessions to scaffold, defaulting to `defaultCount`. Unlike the
+// pickers above this never errors: scaffolding must degrade cleanly with no TTY,
+// so a non-interactive shell (or a cancel, or an unparseable answer) silently
+// yields the default instead of blocking or failing.
+export const promptSessionCount = async (
+  defaultCount: number,
+  interactive: boolean = isInteractive(),
+): Promise<number> => {
+  if (!interactive) {
+    return defaultCount;
+  }
+  const answer = await clack.text({
+    message: '¿Cuántas sesiones quieres configurar?',
+    placeholder: String(defaultCount),
+    defaultValue: String(defaultCount),
+    validate: (value) => {
+      if (value === undefined || value.trim() === '') {
+        return undefined; // empty input falls back to defaultValue
+      }
+      const count = Number(value);
+      return Number.isInteger(count) && count >= 1 ? undefined : 'Ingresa un entero mayor que 0.';
+    },
+  });
+  if (clack.isCancel(answer)) {
+    return defaultCount;
+  }
+  const count = Number(answer);
+  return Number.isInteger(count) && count >= 1 ? count : defaultCount;
+};
+
 // Asks whether E2E is needed for a platform. Non-interactive callers get a
 // 'non-interactive' error so the command can require an explicit flag instead.
 export const confirmE2E = async (

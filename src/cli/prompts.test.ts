@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { RoleStatus } from '../engine/identity.js';
 import { unwrapErr } from '../core/result.test-support.js';
-import { confirmE2E, isInteractive, selectRole } from './prompts.js';
+import { confirmE2E, isInteractive, promptSessionCount, selectRole } from './prompts.js';
 
 const ROLES: RoleStatus[] = [
   { role: 's1', status: 'free', expired: false },
@@ -25,5 +25,13 @@ describe('selectRole', () => {
 describe('confirmE2E', () => {
   it('degrades to a non-interactive error when there is no tty', async () => {
     expect(unwrapErr(await confirmE2E('web', false)).kind).toBe('non-interactive');
+  });
+});
+
+describe('promptSessionCount', () => {
+  it('returns the default silently when there is no tty', async () => {
+    // Unlike the pickers, scaffolding must never block: a non-TTY invocation
+    // yields the default rather than an error.
+    expect(await promptSessionCount(2, false)).toBe(2);
   });
 });

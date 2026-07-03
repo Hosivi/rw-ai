@@ -1,11 +1,19 @@
 import { parseArgs } from 'node:util';
-import { agentKindSchema, type AgentKind } from '../contract/schema.js';
+import {
+  agentKindSchema,
+  dbStrategySchema,
+  stackSchema,
+  type AgentKind,
+  type DbStrategy,
+  type Stack,
+} from '../contract/schema.js';
 import type { CliDeps, CommandResult } from './command.js';
 import { runAdapters } from './commands/adapters.js';
 import { runCheck } from './commands/check.js';
 import { runConfigure } from './commands/configure.js';
 import { runClaim, runInit, runRoles, runRelease, runWhoami } from './commands/identity.js';
 import { runFinish } from './commands/lifecycle.js';
+import { runScaffold } from './commands/scaffold.js';
 import { runAddSession, runArchive } from './commands/sessions.js';
 import { printLines } from './output.js';
 import { readVersion } from './version.js';
@@ -22,6 +30,10 @@ const OPTIONS = {
   areas: { type: 'string' },
   branch: { type: 'string' },
   'new-branch': { type: 'string' },
+  sessions: { type: 'string' },
+  stacks: { type: 'string' },
+  db: { type: 'string' },
+  force: { type: 'boolean' },
   version: { type: 'boolean', short: 'v' },
   help: { type: 'boolean', short: 'h' },
 } as const;
@@ -34,6 +46,8 @@ const USAGE: readonly string[] = [
   'Uso: rw <comando> [opciones]',
   '',
   'Comandos:',
+  '  scaffold [--sessions <n>] [--stacks <a,b>] [--db <docker|local|supabase|none>] [--force]',
+  '                                 Detecta el stack y genera agents.config.json',
   '  configure                      Provisiona ramas, worktrees, bases de datos y el tablero',
   '  adapters                       Escribe los adaptadores (.claude/.opencode) y skills de rw',
   '  roles                          Lista los roles y su estado (libre/ocupado)',
@@ -94,6 +108,49 @@ export const parseAreas = (raw: string | undefined): readonly string[] | undefin
         .map((area) => area.trim())
         .filter((area) => area.length > 0);
 
+// --sessions carries a positive integer count; anything else is a usage error
+// rather than a silent fallback to the default.
+const parseSessions = (raw: string | undefined): number | undefined | 'invalid' => {
+  if (raw === undefined) {
+    return undefined;
+  }
+  const count = Number(raw);
+  return Number.isInteger(count) && count >= 1 ? count : 'invalid';
+};
+
+// --stacks is a comma-separated list validated against stackSchema; blanks are
+// dropped, and an empty or unknown entry is a usage error.
+const parseStacks = (raw: string | undefined): Stack[] | undefined | 'invalid' => {
+  if (raw === undefined) {
+    return undefined;
+  }
+  const parts = raw
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  if (parts.length === 0) {
+    return 'invalid';
+  }
+  const stacks: Stack[] = [];
+  for (const part of parts) {
+    const parsed = stackSchema.safeParse(part);
+    if (!parsed.success) {
+      return 'invalid';
+    }
+    stacks.push(parsed.data);
+  }
+  return stacks;
+};
+
+// --db must be one of the known strategies; an unknown value is a usage error.
+const parseDbStrategy = (raw: string | undefined): DbStrategy | undefined | 'invalid' => {
+  if (raw === undefined) {
+    return undefined;
+  }
+  const parsed = dbStrategySchema.safeParse(raw);
+  return parsed.success ? parsed.data : 'invalid';
+};
+
 // Parse argv, dispatch to the matching handler, and return its result. All
 // process interaction is the caller's (runCli); this stays pure data in/out.
 const route = async (argv: readonly string[], deps: CliDeps): Promise<CommandResult> => {
@@ -126,6 +183,33 @@ const route = async (argv: readonly string[], deps: CliDeps): Promise<CommandRes
   }
 
   switch (command) {
+    case 'scaffold': {
+      const sessions = parseSessions(values.sessions);
+      if (sessions === 'invalid') {
+        return usageError(`Sesiones inválidas '${values.sessions}'. Pasa un entero mayor que 0.`);
+      }
+      const stacks = parseStacks(values.stacks);
+      if (stacks === 'invalid') {
+        return usageError(
+          `Stacks inválidos '${values.stacks}'. Usa: node, android, dotnet (separados por coma).`,
+        );
+      }
+      const db = parseDbStrategy(values.db);
+      if (db === 'invalid') {
+        return usageError(
+          `Estrategia de base de datos inválida '${values.db}'. Usa: docker, local, supabase o none.`,
+        );
+      }
+      return runScaffold(
+        {
+          ...(sessions !== undefined ? { sessions } : {}),
+          ...(stacks !== undefined ? { stacks } : {}),
+          ...(db !== undefined ? { db } : {}),
+          ...(values.force === true ? { force: true } : {}),
+        },
+        deps,
+      );
+    }
     case 'configure':
       return runConfigure(deps);
     case 'adapters':
