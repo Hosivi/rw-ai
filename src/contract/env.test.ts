@@ -6,6 +6,15 @@ import { ENV_KEYS, resolveBoardDir, sessionEnvEntries } from './env.js';
 
 const PROJECT_ROOT = path.resolve('/repo/main');
 
+describe('ENV_KEYS', () => {
+  it('maps the stateless identity variables the CLI reads back from the shell', () => {
+    // RW_SESSION + RW_TOKEN together identify a claim across separate `rw`
+    // invocations, so both must be part of the managed key set.
+    expect(ENV_KEYS.session).toBe('RW_SESSION');
+    expect(ENV_KEYS.token).toBe('RW_TOKEN');
+  });
+});
+
 describe('resolveBoardDir', () => {
   it('anchors the board dir at the project root as an absolute path', () => {
     const config = unwrap(

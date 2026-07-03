@@ -3,6 +3,10 @@ import { PORT_BAND_NAMES, type AgentsConfig, type PortBandName, type Session } f
 
 export const ENV_KEYS = {
   session: 'RW_SESSION',
+  // The claim token an agent exports after `rw init`/`rw claim`; later commands
+  // (whoami/release/finish) read it back from the environment to identify the
+  // holder. Paired with `session` it is the whole stateless identity.
+  token: 'RW_TOKEN',
   boardDir: 'RW_BOARD_DIR',
   apiPort: 'PORT',
   webPort: 'WEB_PORT',
