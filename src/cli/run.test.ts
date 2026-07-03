@@ -55,6 +55,7 @@ describe('runCli', () => {
     expect(code).toBe(0);
     const text = lines.join('\n');
     expect(text).toContain('configure');
+    expect(text).toContain('adapters');
     expect(text).toContain('roles');
     expect(text).toContain('check');
   });

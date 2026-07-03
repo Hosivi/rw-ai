@@ -1,6 +1,7 @@
 import { parseArgs } from 'node:util';
 import { agentKindSchema, type AgentKind } from '../contract/schema.js';
 import type { CliDeps, CommandResult } from './command.js';
+import { runAdapters } from './commands/adapters.js';
 import { runCheck } from './commands/check.js';
 import { runConfigure } from './commands/configure.js';
 import { runClaim, runInit, runRoles, runRelease, runWhoami } from './commands/identity.js';
@@ -34,6 +35,7 @@ const USAGE: readonly string[] = [
   '',
   'Comandos:',
   '  configure                      Provisiona ramas, worktrees, bases de datos y el tablero',
+  '  adapters                       Escribe los adaptadores (.claude/.opencode) y skills de rw',
   '  roles                          Lista los roles y su estado (libre/ocupado)',
   '  init [--role <id>] [--agent <tipo>] [--ttl <horas>]',
   '                                 Elige y reclama un rol (interactivo si no pasas --role)',
@@ -126,6 +128,8 @@ const route = async (argv: readonly string[], deps: CliDeps): Promise<CommandRes
   switch (command) {
     case 'configure':
       return runConfigure(deps);
+    case 'adapters':
+      return runAdapters(deps);
     case 'roles':
       return runRoles(deps);
     case 'init':
