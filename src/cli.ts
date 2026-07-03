@@ -1,3 +1,14 @@
 #!/usr/bin/env node
-// Placeholder entry point so the `rw` bin resolves; the real CLI arrives in a later phase.
-console.log('rw-ai v0.1.0 — configurador multi-sesión (en construcción)');
+import { runCli } from './cli/run.js';
+
+// The ONLY place that touches the real process: build the deps from process.*
+// and hand the resolved exit code to process.exitCode. Every decision lives in
+// the testable runCli/handlers, so this stays a thin wrapper.
+void runCli(process.argv.slice(2), {
+  cwd: process.cwd(),
+  env: process.env,
+  now: new Date(),
+  write: (s) => console.log(s),
+}).then((code) => {
+  process.exitCode = code;
+});
