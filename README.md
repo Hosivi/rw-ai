@@ -81,6 +81,7 @@ Los ejemplos de abajo usan `rw`; si prefieres no enlazar, reemplaza `rw` por `no
 | `rw add-session` | Agrega una nueva sesión a la configuración |
 | `rw archive <id>` | Archiva una sesión |
 | `rw check` | Analiza la integración y detecta conflictos/invasiones |
+| `rw sessions` | Lista los jobs de Claude Code de la máquina (el store en `~/.claude/jobs`, distinto de las sesiones git de rw) |
 
 Opciones globales: `-v`/`--version` muestra la versión, `-h`/`--help` muestra la ayuda completa.
 
