@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { unwrap } from '../core/result.test-support.js';
+import { unwrapErr } from '../core/result.test-support.js';
 import {
   claudeJobsDir,
   filterByCwd,
@@ -35,6 +36,14 @@ describe('listClaudeSessions', () => {
   it('returns ok([]) when the jobs dir does not exist', async () => {
     // A machine that never ran a background job has no jobs dir — not an error.
     expect(unwrap(await listClaudeSessions(home))).toEqual([]);
+  });
+
+  it('returns an io error when the jobs path is not a directory', async () => {
+    // .claude/jobs as a FILE fails readdir with ENOTDIR — a real enumeration
+    // failure, distinct from ENOENT (empty listing).
+    await fs.mkdir(path.join(home, '.claude'), { recursive: true });
+    await fs.writeFile(path.join(home, '.claude', 'jobs'), 'x', 'utf8');
+    expect(unwrapErr(await listClaudeSessions(home)).kind).toBe('io');
   });
 
   it('lists well-formed jobs sorted by updatedAt descending', async () => {

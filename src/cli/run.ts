@@ -10,6 +10,7 @@ import {
 import type { CliDeps, CommandResult } from './command.js';
 import { runAdapters } from './commands/adapters.js';
 import { runCheck } from './commands/check.js';
+import { runSessions } from './commands/claude-sessions.js';
 import { runConfigure } from './commands/configure.js';
 import { runClaim, runInit, runRoles, runRelease, runWhoami } from './commands/identity.js';
 import { runFinish } from './commands/lifecycle.js';
@@ -33,6 +34,8 @@ const OPTIONS = {
   sessions: { type: 'string' },
   stacks: { type: 'string' },
   db: { type: 'string' },
+  cwd: { type: 'string' },
+  claim: { type: 'boolean' },
   force: { type: 'boolean' },
   version: { type: 'boolean', short: 'v' },
   help: { type: 'boolean', short: 'h' },
@@ -63,6 +66,7 @@ const USAGE: readonly string[] = [
   '                                 Agrega una nueva sesión a la configuración',
   '  archive <id>                   Archiva una sesión',
   '  check                          Analiza la integración y detecta conflictos/invasiones',
+  '  sessions [--cwd <ruta>] [--claim]   Lista los jobs de Claude Code de la máquina',
   '',
   'Opciones globales:',
   '  -v, --version                  Muestra la versión',
@@ -232,6 +236,8 @@ const route = async (argv: readonly string[], deps: CliDeps): Promise<CommandRes
       return runArchive({ id: positionals[1] }, deps);
     case 'check':
       return runCheck(deps);
+    case 'sessions':
+      return runSessions({ cwd: values.cwd, claim: values.claim === true }, deps);
     default:
       return usageError(`Comando desconocido: ${command}`);
   }

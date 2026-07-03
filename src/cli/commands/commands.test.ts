@@ -18,6 +18,7 @@ const TTL_MS = 28_800_000;
 // keypresses — the split is exercised through deps.interactive alone.
 const deps = (repo: TempRepo, env: Record<string, string | undefined> = {}): CliDeps => ({
   cwd: repo.root,
+  homeDir: repo.root,
   env,
   now: NOW,
   interactive: false,
@@ -119,6 +120,7 @@ describe('command handlers (context failures)', () => {
 
   const brokenDeps: CliDeps = {
     cwd: '/anywhere',
+    homeDir: '/anywhere',
     env: {},
     now: NOW,
     run: gitNotARepo,

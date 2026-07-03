@@ -64,7 +64,7 @@ describe('runCheck (integration gate)', () => {
   let repo: TempRepo;
   let config: AgentsConfig;
 
-  const deps = (): CliDeps => ({ cwd: repo.root, env: {}, now: NOW });
+  const deps = (): CliDeps => ({ cwd: repo.root, homeDir: repo.root, env: {}, now: NOW });
 
   beforeAll(async () => {
     repo = await createTempRepo();
@@ -117,6 +117,7 @@ describe('runCheck (context failure)', () => {
   it('surfaces a not-a-repo context error as exit 1 instead of swallowing it', async () => {
     const result = await runCheck({
       cwd: '/anywhere',
+      homeDir: '/anywhere',
       env: {},
       now: NOW,
       run: gitNotARepo,

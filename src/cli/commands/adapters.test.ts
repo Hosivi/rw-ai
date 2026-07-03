@@ -13,7 +13,7 @@ const NOW = new Date('2026-07-02T12:00:00.000Z');
 describe('runAdapters (CLI)', () => {
   let repo: TempRepo;
 
-  const deps = (): CliDeps => ({ cwd: repo.root, env: {}, now: NOW });
+  const deps = (): CliDeps => ({ cwd: repo.root, homeDir: repo.root, env: {}, now: NOW });
 
   beforeAll(async () => {
     repo = await createTempRepo();
@@ -50,6 +50,7 @@ describe('runAdapters (context failure)', () => {
   it('surfaces a not-a-repo context error as exit 1', async () => {
     const result = await runAdapters({
       cwd: '/anywhere',
+      homeDir: '/anywhere',
       env: {},
       now: NOW,
       run: gitNotARepo,

@@ -1,4 +1,6 @@
 import { readFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { err } from '../core/result.js';
@@ -21,6 +23,7 @@ const capture = (
   const lines: string[] = [];
   const deps: CliDeps = {
     cwd: process.cwd(),
+    homeDir: process.cwd(),
     env: {},
     now: NOW,
     write: (line) => lines.push(line),
@@ -141,6 +144,21 @@ describe('runCli', () => {
     expect(code).toBe(1);
     expect(lines.join('\n')).not.toContain('Comando desconocido');
     expect(lines.join('\n').toLowerCase()).toContain('git');
+  });
+
+  it('lists the sessions command in --help', async () => {
+    const { lines, deps } = capture();
+    const code = await runCli(['--help'], deps);
+    expect(code).toBe(0);
+    expect(lines.join('\n')).toContain('sessions');
+  });
+
+  it('routes sessions to its handler and exits 0 with no jobs', async () => {
+    // A homeDir with no .claude/jobs yields an empty (not failed) listing.
+    const { lines, deps } = capture({ homeDir: path.join(os.tmpdir(), 'rw-ai-no-such-home-xyz') });
+    const code = await runCli(['sessions'], deps);
+    expect(code).toBe(0);
+    expect(lines.join('\n')).toContain('No hay sesiones de Claude Code');
   });
 
   it('routes a real command to its handler', async () => {

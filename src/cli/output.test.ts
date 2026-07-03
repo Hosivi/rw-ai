@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import type { ClaudeSession } from '../engine/claude-sessions.js';
 import type { RunbookResult } from '../engine/configure.js';
 import type { RoleStatus } from '../engine/identity.js';
 import type { IntegrationAnalysis } from '../engine/integrator.js';
 import type { CliContextError } from './context.js';
 import {
+  formatClaudeSessions,
   formatContextError,
   formatIntegration,
   formatRoles,
@@ -158,6 +160,41 @@ describe('formatContextError', () => {
   it('surfaces the underlying message for an io failure', () => {
     const error: CliContextError = { kind: 'io', message: 'disk on fire' };
     expect(formatContextError(error)).toContain('disk on fire');
+  });
+});
+
+describe('formatClaudeSessions', () => {
+  it('renders a Spanish table header with one row per session', () => {
+    const sessions: ClaudeSession[] = [
+      {
+        id: 'job-1',
+        cwd: 'E:\\repos\\app',
+        state: 'running',
+        updatedAt: '2026-07-02T12:00:00.000Z',
+        name: 'Newer',
+      },
+    ];
+    const text = formatClaudeSessions(sessions);
+    const lines = text.split('\n');
+    expect(lines[0]).toBe('| Job | Proyecto | Estado | Último | Nombre |');
+    expect(text).toContain('job-1');
+    expect(text).toContain('E:\\repos\\app');
+    expect(text).toContain('running');
+    expect(text).toContain('2026-07-02T12:00:00.000Z');
+    expect(text).toContain('Newer');
+  });
+
+  it('renders — for every absent field', () => {
+    expect(formatClaudeSessions([{ id: 'job-2' }])).toContain('| job-2 | — | — | — | — |');
+  });
+
+  it('returns a Spanish placeholder when there are no sessions', () => {
+    expect(formatClaudeSessions([])).toBe('_No hay sesiones de Claude Code en esta máquina._');
+  });
+
+  it('is deterministic', () => {
+    const sessions: ClaudeSession[] = [{ id: 'job-1', state: 'done' }];
+    expect(formatClaudeSessions(sessions)).toBe(formatClaudeSessions(sessions));
   });
 });
 

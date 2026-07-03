@@ -1,4 +1,5 @@
 import { assertNever } from '../core/assert.js';
+import type { ClaudeSession } from '../engine/claude-sessions.js';
 import type { RunbookResult, StepStatus } from '../engine/configure.js';
 import type { RoleStatus } from '../engine/identity.js';
 import { integrationSummaryLine, type IntegrationAnalysis } from '../engine/integrator.js';
@@ -85,6 +86,23 @@ export const formatIntegration = (analysis: IntegrationAnalysis): string => {
     }
   }
   return lines.join('\n');
+};
+
+// The machine-level Claude Code job listing as a Spanish markdown table (neutral
+// Peruvian, tuteo). Absent fields render as '—'. Pure and deterministic, and it
+// only ever shows the identifying columns — never prompt or token content.
+export const formatClaudeSessions = (sessions: readonly ClaudeSession[]): string => {
+  if (sessions.length === 0) {
+    return '_No hay sesiones de Claude Code en esta máquina._';
+  }
+  const cell = (value: string | undefined): string => value ?? '—';
+  const header = '| Job | Proyecto | Estado | Último | Nombre |';
+  const separator = '| --- | --- | --- | --- | --- |';
+  const rows = sessions.map(
+    (session) =>
+      `| ${session.id} | ${cell(session.cwd)} | ${cell(session.state)} | ${cell(session.updatedAt)} | ${cell(session.name)} |`,
+  );
+  return [header, separator, ...rows].join('\n');
 };
 
 // Turns a context failure into an actionable Spanish message: each kind names the

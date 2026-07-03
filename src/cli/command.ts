@@ -16,6 +16,10 @@ export type CommandResult = {
 // here so nothing reads `process.*`/`console.*` directly except the bin.
 export type CliDeps = {
   readonly cwd: string;
+  // The machine home dir (os.homedir() in the bin). Only `rw sessions` reads it —
+  // to locate Claude Code's job store under ~/.claude/jobs — but it lives here so
+  // no handler ever touches os/process directly. Existing handlers ignore it.
+  readonly homeDir: string;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly now: Date;
   readonly run?: CommandRunner;
