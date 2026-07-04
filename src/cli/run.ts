@@ -13,6 +13,7 @@ import { runCheck } from './commands/check.js';
 import { runSessions } from './commands/claude-sessions.js';
 import { runConfigure } from './commands/configure.js';
 import { runClaim, runInit, runRoles, runRelease, runWhoami } from './commands/identity.js';
+import { runLane } from './commands/lane.js';
 import { runFinish } from './commands/lifecycle.js';
 import { runScaffold } from './commands/scaffold.js';
 import { runAddSession, runArchive } from './commands/sessions.js';
@@ -70,6 +71,7 @@ const USAGE: readonly string[] = [
   '                                 Agrega una nueva sesión a la configuración',
   '  archive <id>                   Archiva una sesión',
   '  check                          Analiza la integración y detecta conflictos/invasiones',
+  '  lane <ruta>                    Verifica si una ruta cae dentro de las áreas de tu sesión (0 permitido, 3 invasión)',
   '  sessions [--cwd <ruta>] [--claim]   Lista los jobs de Claude Code de la máquina',
   '  tokens [rutas...] [--model <id>] [--online]   Estima tokens y costo del contenido',
   '  mcp                            Inicia el servidor MCP (para que Claude Code / OpenCode usen rw como herramientas nativas)',
@@ -247,6 +249,8 @@ const route = async (argv: readonly string[], deps: CliDeps): Promise<CommandRes
       return runArchive({ id: positionals[1] }, deps);
     case 'check':
       return runCheck(deps);
+    case 'lane':
+      return runLane({ path: positionals[1] }, deps);
     case 'sessions':
       return runSessions({ cwd: values.cwd, claim: values.claim === true }, deps);
     case 'tokens':
