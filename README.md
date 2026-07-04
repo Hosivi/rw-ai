@@ -90,7 +90,7 @@ Los ejemplos de abajo usan `rw`.
 | --- | --- |
 | `rw scaffold` | Detecta el stack y genera `agents.config.json` |
 | `rw configure` | Provisiona ramas, worktrees, bases de datos y el tablero |
-| `rw adapters` | Escribe los adaptadores (`.claude`/`.opencode`) y skills de rw |
+| `rw adapters [--worktrees]` | Escribe la config del agente (MCP + hook), los adaptadores (`.claude`/`.opencode`) y skills de rw |
 | `rw roles` | Lista los roles y su estado (libre/ocupado) |
 | `rw init` | Elige y reclama un rol (interactivo si no pasas `--role`) |
 | `rw claim <rol>` | Reclama un rol específico sin interacción |
@@ -127,7 +127,46 @@ Si ya existe una configuración, `rw scaffold` no la pisa: te avisa y te pide `-
 
 ## Adaptadores para agentes
 
-`rw adapters` escribe los adaptadores multi-agente (`.claude` y `.opencode`) y las skills de rw en tu repo, para que Claude Code y opencode compartan el mismo contexto y las mismas convenciones al trabajar con `rw-ai`. Córrelo una vez que el repo esté configurado.
+`rw adapters` cablea el modelo completo **"dentro del agente"** con un solo comando, de forma **no destructiva** e **idempotente** (vuelve a correrlo cuando quieras: solo reescribe lo que cambió). Córrelo una vez que el repo esté configurado. Escribe:
+
+1. **Skills y comandos** (`.claude`/`.opencode`): el mismo contexto y las mismas convenciones para Claude Code y opencode al trabajar con `rw-ai`.
+2. **El servidor MCP** para que el agente use rw como herramientas nativas (`rw_status`, `rw_check`, `rw_claim`, `rw_finish`, `rw_lane_check`, `rw_roles`, `rw_whoami`, `rw_release`) en vez de parsear la salida de la shell.
+3. **El hook de carril** (`PreToolUse`) que bloquea escrituras fuera del carril de tu sesión (ver la sección de abajo).
+
+### Qué archivos escribe
+
+**Claude Code** — dos archivos de config, fusionados sin pisar lo tuyo:
+
+- `.mcp.json` — agrega el servidor MCP `rw-ai` bajo `mcpServers` (preserva cualquier otro servidor y clave):
+
+  ```json
+  { "mcpServers": { "rw-ai": { "command": "rw", "args": ["mcp"] } } }
+  ```
+
+- `.claude/settings.json` — agrega un grupo `PreToolUse` que corre el guard de carril (preserva cualquier otro hook y clave; no duplica el grupo al re-correr):
+
+  ```json
+  { "hooks": { "PreToolUse": [ { "matcher": "Write|Edit|MultiEdit", "hooks": [ { "type": "command", "command": "rw lane-guard" } ] } ] } }
+  ```
+
+**OpenCode** — `opencode.json`, fusionado sin pisar lo tuyo, con el servidor MCP `rw-ai`:
+
+```json
+{ "mcp": { "rw-ai": { "type": "local", "command": ["rw", "mcp"], "enabled": true } } }
+```
+
+> **El hook de carril para OpenCode queda pendiente de verificación.** OpenCode sí tiene un hook pre-escritura (`tool.execute.before`), pero **solo** vía un plugin TypeScript (`.opencode/plugin/*.ts`), no una entrada JSON fusionable; además ese hook recibe el payload propio de OpenCode, no el payload `PreToolUse` de Claude Code que `rw lane-guard` lee por stdin. Cablear eso bien requiere un adaptador de payload que todavía no existe, así que **no se inventa**: por ahora `rw adapters` solo escribe el servidor MCP de OpenCode y este hueco queda documentado. Honestidad sobre completitud: una config equivocada es peor que un hueco documentado.
+
+Si un archivo de config existente **no es JSON válido**, `rw adapters` **no lo sobrescribe**: sale con error nombrándolo para que lo arregles a mano.
+
+### `--worktrees` (modelo de despliegue)
+
+Por defecto la config se escribe **solo en la raíz compartida** del repo. Con `--worktrees`, `rw adapters` **también** escribe `.mcp.json` y `.claude/settings.json` (misma lógica de fusión) dentro de **cada worktree de sesión activa**, para que un agente arrancado por worktree quede cableado ahí también. El hook y el servidor MCP resuelven la sesión desde el cwd, así que funcionan igual dentro de un worktree.
+
+```bash
+rw adapters              # solo la raíz compartida
+rw adapters --worktrees  # además, cada worktree de sesión activa
+```
 
 ## Aplicación de carriles (hook)
 
@@ -149,12 +188,12 @@ Cada sesión declara sus **áreas** (`areas`) en `agents.config.json`: los globs
 
 2. **Enlaza el hook `PreToolUse`.** El hook lee el payload de la herramienta por stdin y, si la escritura sale del carril de la sesión, la bloquea (sale con código 2 y explica el motivo por stderr, que Claude Code le muestra al agente). En cualquier otro caso deja pasar la operación —falla en abierto: nunca bloquea por un error propio, ni fuera de una sesión de rw—.
 
-   `rw adapters` (R3, en camino) enlazará este hook automáticamente. Mientras tanto, para Claude Code puedes agregarlo a mano en `.claude/settings.json`:
+   Ya no lo enlaces a mano: **`rw adapters` lo cablea automáticamente** en `.claude/settings.json` (y de paso registra el servidor MCP). Mira la sección [Adaptadores para agentes](#adaptadores-para-agentes). El grupo que agrega es:
 
    ```json
    { "hooks": { "PreToolUse": [ { "matcher": "Write|Edit|MultiEdit", "hooks": [ { "type": "command", "command": "rw lane-guard" } ] } ] } }
    ```
 
-   El equivalente en opencode (su mecanismo de plugin/permiso) todavía está por verificar y se abordará en R3.
+   El equivalente en opencode queda **pendiente de verificación**: su hook pre-escritura (`tool.execute.before`) solo existe vía un plugin TypeScript, no una entrada JSON, y recibe un payload distinto al de Claude Code. `rw adapters` escribe el servidor MCP de opencode pero **no** el hook, para no inventar una config equivocada.
 
 Para una comprobación puntual desde la terminal o un script, usa `rw lane <ruta>` (sale 0 si está permitida, 3 si es invasión). Ambos comandos solo tienen sentido **dentro del worktree de una sesión**.
