@@ -8,6 +8,10 @@ import { formatContextError } from './output.js';
 export type CommandResult = {
   readonly lines: readonly string[];
   readonly exitCode: number;
+  // Lines the bin routes to STDERR (never stdout). Only `rw lane-guard` uses this:
+  // Claude Code's PreToolUse convention surfaces a hook's stderr to the agent when
+  // it exits 2, so the block reason must land on stderr, not stdout.
+  readonly stderr?: readonly string[];
 };
 
 // The injected world a handler runs in. Every impurity a command could reach for
@@ -26,6 +30,12 @@ export type CliDeps = {
   readonly runRaw?: CommandRunner;
   readonly interactive?: boolean;
   readonly write?: (s: string) => void;
+  // A STDERR sink, mirroring `write`. Only the bin passes it (console.error) and
+  // only `rw lane-guard` produces stderr, so every other handler ignores it.
+  readonly writeErr?: (s: string) => void;
+  // Raw STDIN, read by the bin ONLY for `rw lane-guard` (the PreToolUse hook reads
+  // its payload from stdin). Injectable so handlers never touch process.stdin.
+  readonly stdin?: string;
 };
 
 // The single mapping every command uses when loadContext fails: the Spanish

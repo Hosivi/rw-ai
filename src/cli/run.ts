@@ -14,6 +14,7 @@ import { runSessions } from './commands/claude-sessions.js';
 import { runConfigure } from './commands/configure.js';
 import { runClaim, runInit, runRoles, runRelease, runWhoami } from './commands/identity.js';
 import { runLane } from './commands/lane.js';
+import { runLaneGuard } from './commands/lane-guard.js';
 import { runFinish } from './commands/lifecycle.js';
 import { runScaffold } from './commands/scaffold.js';
 import { runAddSession, runArchive } from './commands/sessions.js';
@@ -72,6 +73,7 @@ const USAGE: readonly string[] = [
   '  archive <id>                   Archiva una sesión',
   '  check                          Analiza la integración y detecta conflictos/invasiones',
   '  lane <ruta>                    Verifica si una ruta cae dentro de las áreas de tu sesión (0 permitido, 3 invasión)',
+  '  lane-guard                     Hook PreToolUse (lee el payload por stdin y bloquea escrituras fuera de carril); no es para uso manual',
   '  sessions [--cwd <ruta>] [--claim]   Lista los jobs de Claude Code de la máquina',
   '  tokens [rutas...] [--model <id>] [--online]   Estima tokens y costo del contenido',
   '  mcp                            Inicia el servidor MCP (para que Claude Code / OpenCode usen rw como herramientas nativas)',
@@ -251,6 +253,9 @@ const route = async (argv: readonly string[], deps: CliDeps): Promise<CommandRes
       return runCheck(deps);
     case 'lane':
       return runLane({ path: positionals[1] }, deps);
+    case 'lane-guard':
+      // The PreToolUse hook: the bin threads the real stdin through deps.stdin.
+      return runLaneGuard({ ...deps, stdin: deps.stdin ?? '' });
     case 'sessions':
       return runSessions({ cwd: values.cwd, claim: values.claim === true }, deps);
     case 'tokens':
@@ -274,5 +279,10 @@ const route = async (argv: readonly string[], deps: CliDeps): Promise<CommandRes
 export const runCli = async (argv: readonly string[], deps: CliDeps): Promise<number> => {
   const result = await route(argv, deps);
   printLines(result.lines, deps.write);
+  // stderr is separate from stdout: only `rw lane-guard` fills it, and its block
+  // reason must reach the hook's stderr channel, never stdout.
+  if (result.stderr !== undefined && result.stderr.length > 0) {
+    printLines(result.stderr, deps.writeErr ?? ((s) => console.error(s)));
+  }
   return result.exitCode;
 };
