@@ -26,18 +26,34 @@ describe('runAdapters (CLI)', () => {
   });
 
   it('writes the adapters and reports the Spanish summary counts, then is idempotent', async () => {
-    const first = await runAdapters(deps());
+    const first = await runAdapters({}, deps());
     expect(first.exitCode).toBe(0);
     const text = first.lines.join('\n');
     expect(text).toContain('archivos escritos');
     expect(text).toContain('creados');
+    // The summary now also names the config files it wired and the OpenCode gap.
+    expect(text).toContain('.mcp.json');
+    expect(text).toContain('opencode.json');
+    expect(text.toLowerCase()).toContain('pendiente de verificación');
     expect(existsSync(path.join(repo.root, '.claude', 'skills', 'rw-workflow', 'SKILL.md'))).toBe(true);
     expect(existsSync(path.join(repo.root, '.opencode', 'command', 'rw-finish.md'))).toBe(true);
+    expect(existsSync(path.join(repo.root, '.mcp.json'))).toBe(true);
+    expect(existsSync(path.join(repo.root, '.claude', 'settings.json'))).toBe(true);
+    expect(existsSync(path.join(repo.root, 'opencode.json'))).toBe(true);
 
     // A second run rewrites nothing: every file reports "sin cambios".
-    const second = await runAdapters(deps());
+    const second = await runAdapters({}, deps());
     expect(second.exitCode).toBe(0);
     expect(second.lines.join('\n')).toContain('sin cambios');
+  }, 60000);
+
+  it('with --worktrees also writes the config into each active session worktree', async () => {
+    const result = await runAdapters({ worktrees: true }, deps());
+    expect(result.exitCode).toBe(0);
+    expect(result.lines.join('\n')).toContain('worktree');
+    for (const session of buildConfig().sessions) {
+      expect(existsSync(path.join(repo.root, session.worktree, '.mcp.json'))).toBe(true);
+    }
   }, 60000);
 });
 
@@ -48,14 +64,17 @@ describe('runAdapters (context failure)', () => {
     err({ kind: 'non-zero-exit', output: { stdout: '', stderr: 'fatal', exitCode: 128 } });
 
   it('surfaces a not-a-repo context error as exit 1', async () => {
-    const result = await runAdapters({
-      cwd: '/anywhere',
-      homeDir: '/anywhere',
-      env: {},
-      now: NOW,
-      run: gitNotARepo,
-      runRaw: gitNotARepo,
-    });
+    const result = await runAdapters(
+      {},
+      {
+        cwd: '/anywhere',
+        homeDir: '/anywhere',
+        env: {},
+        now: NOW,
+        run: gitNotARepo,
+        runRaw: gitNotARepo,
+      },
+    );
     expect(result.exitCode).toBe(1);
     expect(result.lines.join('\n').toLowerCase()).toContain('git');
   });
