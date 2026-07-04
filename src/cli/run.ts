@@ -72,6 +72,7 @@ const USAGE: readonly string[] = [
   '  check                          Analiza la integración y detecta conflictos/invasiones',
   '  sessions [--cwd <ruta>] [--claim]   Lista los jobs de Claude Code de la máquina',
   '  tokens [rutas...] [--model <id>] [--online]   Estima tokens y costo del contenido',
+  '  mcp                            Inicia el servidor MCP (para que Claude Code / OpenCode usen rw como herramientas nativas)',
   '',
   'Opciones globales:',
   '  -v, --version                  Muestra la versión',
