@@ -110,13 +110,16 @@ Opciones globales: `-v`/`--version` muestra la versión, `-h`/`--help` muestra l
 ### `rw scaffold` en detalle
 
 ```bash
-rw scaffold [--sessions <n>] [--stacks <a,b>] [--db <docker|local|supabase|none>] [--force]
+rw scaffold [--sessions <n>] [--stacks <a,b>] [--db <docker|local|supabase|none>] [--base-branch <rama>] [--force]
 ```
 
 - `--sessions <n>` — cuántas sesiones configurar (por defecto 2).
 - `--stacks <a,b>` — fuerza los stacks en lugar de detectarlos (`node`, `android`, `dotnet`, separados por coma).
 - `--db <estrategia>` — fuerza la estrategia de base de datos en lugar de detectarla.
+- `--base-branch <rama>` — fuerza la rama base en lugar de detectarla.
 - `--force` — sobrescribe un `agents.config.json` existente.
+
+`rw scaffold` detecta la rama base real del repo en vez de asumir `main`: usa `main` si existe, si no `master`, y si no la rama en la que estás parado. Así `git.baseBranch` apunta a una rama que **existe** y `rw configure` no falla en el paso de la rama de integración. Si tu repo usa otra convención, pásala con `--base-branch <rama>`.
 
 Si ya existe una configuración, `rw scaffold` no la pisa: te avisa y te pide `--force` para reemplazarla.
 
