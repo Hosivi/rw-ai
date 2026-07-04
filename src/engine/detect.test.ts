@@ -2,8 +2,9 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { detectProject, detectProjectName, detectStacks } from './detect.js';
-import { removeDirRobust } from './git.test-support.js';
+import { detectBaseBranch, detectProject, detectProjectName, detectStacks } from './detect.js';
+import { createGit } from './git.js';
+import { createTempRepo, removeDirRobust, runGitOrThrow, type TempRepo } from './git.test-support.js';
 
 let dir: string;
 
@@ -77,6 +78,31 @@ describe('detectProjectName', () => {
   it('never throws on invalid JSON', async () => {
     await write('package.json', '{ not json');
     expect(await detectProjectName(dir)).toBe(path.basename(dir));
+  });
+});
+
+describe('detectBaseBranch', () => {
+  let repo: TempRepo;
+
+  afterEach(async () => {
+    await repo.cleanup();
+  });
+
+  it("returns 'main' when the repo has a main branch", async () => {
+    repo = await createTempRepo();
+    expect(await detectBaseBranch(createGit(repo.root))).toBe('main');
+  });
+
+  it("returns 'master' when main is absent but master exists", async () => {
+    repo = await createTempRepo();
+    await runGitOrThrow(repo.root, ['branch', '-m', 'main', 'master']);
+    expect(await detectBaseBranch(createGit(repo.root))).toBe('master');
+  });
+
+  it('falls back to the current branch when neither main nor master exists', async () => {
+    repo = await createTempRepo();
+    await runGitOrThrow(repo.root, ['branch', '-m', 'main', 'trunk']);
+    expect(await detectBaseBranch(createGit(repo.root))).toBe('trunk');
   });
 });
 

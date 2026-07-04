@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Stack } from '../contract/schema.js';
 import { detectDbSetup, type DbDetection } from './database.js';
+import type { Git } from './git.js';
 
 // ---------------------------------------------------------------------------
 // Stack + project-name detection by marker files (existence only, no deep parse)
@@ -85,6 +86,31 @@ export const detectProjectName = async (projectRoot: string): Promise<string> =>
     // Malformed JSON: fall through to the basename fallback.
   }
   return fallback;
+};
+
+// The conventional base-branch candidates, in preference order. Prefer a
+// default that ACTUALLY EXISTS over a hardcoded guess: rw configure's
+// integration-branch step requires git.baseBranch to exist, so scaffolding a
+// non-existent branch (e.g. 'main' in a 'master' repo) makes configure fail
+// immediately.
+const BASE_BRANCH_CANDIDATES = ['main', 'master'] as const;
+
+// Detects the repo's base branch: 'main' if it exists, else 'master' if it
+// exists, else whatever HEAD currently points at, else 'main' as a last resort.
+// Best-effort like detectProjectName — every git probe degrades to the next
+// candidate rather than throwing, so onboarding never aborts on a branch probe.
+export const detectBaseBranch = async (git: Git): Promise<string> => {
+  for (const candidate of BASE_BRANCH_CANDIDATES) {
+    const exists = await git.branchExists(candidate);
+    if (exists.ok && exists.value) {
+      return candidate;
+    }
+  }
+  const current = await git.currentBranch();
+  if (current.ok && current.value.trim() !== '') {
+    return current.value;
+  }
+  return BASE_BRANCH_CANDIDATES[0];
 };
 
 // ---------------------------------------------------------------------------
