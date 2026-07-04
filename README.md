@@ -100,6 +100,8 @@ Los ejemplos de abajo usan `rw`.
 | `rw add-session` | Agrega una nueva sesión a la configuración |
 | `rw archive <id>` | Archiva una sesión |
 | `rw check` | Analiza la integración y detecta conflictos/invasiones |
+| `rw lane <ruta>` | Verifica si una ruta cae dentro de las áreas de tu sesión (sale 0 si está permitida, 3 si es invasión) |
+| `rw lane-guard` | Hook `PreToolUse` para agentes: lee el payload por stdin y bloquea escrituras fuera de carril (no es para uso manual) |
 | `rw sessions` | Lista los jobs de Claude Code de la máquina (el store en `~/.claude/jobs`, distinto de las sesiones git de rw) |
 | `rw tokens [rutas...]` | Estima tokens y costo del contenido (`--model <id>`, `--online` para conteo exacto) |
 
@@ -126,3 +128,33 @@ Si ya existe una configuración, `rw scaffold` no la pisa: te avisa y te pide `-
 ## Adaptadores para agentes
 
 `rw adapters` escribe los adaptadores multi-agente (`.claude` y `.opencode`) y las skills de rw en tu repo, para que Claude Code y opencode compartan el mismo contexto y las mismas convenciones al trabajar con `rw-ai`. Córrelo una vez que el repo esté configurado.
+
+## Aplicación de carriles (hook)
+
+Cada sesión declara sus **áreas** (`areas`) en `agents.config.json`: los globs, relativos a la raíz del repo, que le corresponden (por ejemplo `src/api/**`). `rw check` ya detecta *después* del hecho cuando una sesión escribió fuera de su carril; el hook `rw lane-guard` lo convierte en **prevención en tiempo real** y bloquea la escritura antes de que ocurra.
+
+1. **Estrecha las áreas de cada sesión.** Por defecto una sesión abarca `**/*` (todo el repo), así que no hay nada que hacer cumplir. Edita `agents.config.json` y dale a cada sesión solo los globs que le tocan:
+
+   ```json
+   {
+     "sessions": [
+       { "id": "s1", "areas": ["src/api/**"], "...": "..." },
+       { "id": "s2", "areas": ["src/web/**"], "...": "..." }
+     ],
+     "sharedZones": ["package.json", "src/shared/**"]
+   }
+   ```
+
+   Lo que cae en `sharedZones` se permite desde cualquier sesión (son puntos de colaboración deliberados); todo lo demás fuera de las áreas de la sesión es una **invasión**.
+
+2. **Enlaza el hook `PreToolUse`.** El hook lee el payload de la herramienta por stdin y, si la escritura sale del carril de la sesión, la bloquea (sale con código 2 y explica el motivo por stderr, que Claude Code le muestra al agente). En cualquier otro caso deja pasar la operación —falla en abierto: nunca bloquea por un error propio, ni fuera de una sesión de rw—.
+
+   `rw adapters` (R3, en camino) enlazará este hook automáticamente. Mientras tanto, para Claude Code puedes agregarlo a mano en `.claude/settings.json`:
+
+   ```json
+   { "hooks": { "PreToolUse": [ { "matcher": "Write|Edit|MultiEdit", "hooks": [ { "type": "command", "command": "rw lane-guard" } ] } ] } }
+   ```
+
+   El equivalente en opencode (su mecanismo de plugin/permiso) todavía está por verificar y se abordará en R3.
+
+Para una comprobación puntual desde la terminal o un script, usa `rw lane <ruta>` (sale 0 si está permitida, 3 si es invasión). Ambos comandos solo tienen sentido **dentro del worktree de una sesión**.
