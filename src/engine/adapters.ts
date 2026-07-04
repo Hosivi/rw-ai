@@ -72,6 +72,32 @@ const workflowBody = (config: AgentsConfig): string =>
     '',
     'Si el repo todavía no está provisionado, corre `rw configure` primero.',
     '',
+    '## rw como herramientas MCP (prefiérelas)',
+    '',
+    'Si el repo corrió `rw adapters`, rw queda enlazado como servidor MCP y tienes',
+    'estas herramientas NATIVAS. PREFIÉRELAS antes que correr `rw` en la shell: llamar',
+    'la herramienta te da datos estructurados en vez de texto que tendrías que parsear.',
+    '',
+    '- `rw_status` — estado general: tu sesión actual más el estado de todos los roles.',
+    '- `rw_roles` — lista de roles y si están libres u ocupados.',
+    '- `rw_whoami` — qué rol tienes según tu token.',
+    '- `rw_claim` / `rw_release` — reclama o libera un rol.',
+    '- `rw_check` — analiza la integración (conflictos e invasiones de carril).',
+    '- `rw_finish` — integra tu sesión y rota su rama.',
+    '- `rw_lane_check` — verifica si una ruta cae dentro de tu carril antes de escribirla.',
+    '',
+    'Usa la shell (`rw ...`) solo como respaldo si el servidor MCP no está disponible.',
+    '',
+    '## El hook de carril (PreToolUse)',
+    '',
+    '`rw adapters` también enlaza un hook `PreToolUse` que corre `rw lane-guard` antes de',
+    'cada Write/Edit/MultiEdit. Si intentas escribir un archivo FUERA de las `areas` de tu',
+    'sesión, el hook BLOQUEA la escritura (exit 2) y te explica por qué por stderr.',
+    '',
+    'Si un bloqueo te estorba, NO lo pelees: estrecha o ajusta las `areas` de tu sesión en',
+    '`agents.config.json`, o coordina si el archivo pertenece a otra sesión. El hook resuelve',
+    'la sesión desde el cwd, así que funciona igual cuando corres dentro de un worktree.',
+    '',
     '## Sesiones activas en este repo',
     '',
     activeSessionTable(config),
@@ -102,6 +128,10 @@ const identityBody = (): string =>
     '',
     '- `rw whoami` — lee tu `RW_TOKEN` del entorno y te dice qué rol tienes.',
     '- `rw release` — libera el rol que tienes reclamado para que otro agente lo tome.',
+    '',
+    'Con `rw adapters` corrido, prefiere las herramientas MCP equivalentes: `rw_roles`',
+    'para listar roles, `rw_claim` para reclamar, `rw_whoami` para consultar tu rol y',
+    '`rw_release` para soltarlo. Devuelven datos estructurados en vez de texto de shell.',
     '',
     '## El locking es cooperativo',
     '',
@@ -136,6 +166,12 @@ const integrationBody = (): string =>
     'terminar, rw **rota la rama**: nunca se renombra una rama. Los worktrees son fijos y',
     'las ramas son descartables — `rw finish` integra el trabajo y deja el worktree listo',
     'sobre una rama nueva para el siguiente ciclo.',
+    '',
+    '## Como herramientas MCP',
+    '',
+    'Con `rw adapters` corrido, prefiere las herramientas MCP: `rw_check` para analizar la',
+    'integración (te dice `blocking: true/false` sin parsear texto) y `rw_finish` para',
+    'integrar y rotar la rama. Usa la shell solo si el servidor MCP no está disponible.',
   ].join('\n');
 
 const testArtifactsBody = (): string =>
@@ -287,7 +323,9 @@ const renderCommandWrapper = (wrapper: CommandWrapper): string =>
   ['---', `description: ${JSON.stringify(wrapper.description)}`, '---', '', wrapper.body, ''].join('\n');
 
 export type AdaptersError = {
-  readonly kind: 'io';
+  // 'io' is a filesystem failure; 'invalid-json' means an existing config file the
+  // merge must not clobber is unparseable — the user fixes it by hand.
+  readonly kind: 'io' | 'invalid-json';
   readonly message: string;
   readonly cause?: unknown;
 };
@@ -322,12 +360,182 @@ const planWrites = (config: AgentsConfig): PlannedWrite[] => {
   return writes;
 };
 
+// --- JSON config merging ----------------------------------------------------
+// The MCP server config and the PreToolUse hook live in JSON files that may
+// already carry unrelated user content, so they are MERGED (read → mutate the one
+// key rw owns → write) instead of overwritten. Every merge preserves unknown keys.
+
+type JsonObject = Record<string, unknown>;
+
+const isPlainObject = (value: unknown): value is JsonObject =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+// Files rw owns are pretty-printed with 2-space indent and a trailing newline, so
+// a file rw wrote re-serializes byte-identically (idempotent) and a hand-edited
+// file stabilizes to this shape after the first merge.
+const serializeJson = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
+
+// Reads an existing JSON config as an object, or an empty object when absent. A
+// file that exists but is not a JSON object is a HARD error: we must never clobber
+// content we cannot safely parse and merge into.
+const readJsonConfig = async (filePath: string): Promise<Result<JsonObject, AdaptersError>> => {
+  let raw: string;
+  try {
+    raw = await fs.readFile(filePath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return ok({}); // absent → rw creates a fresh file from the empty base
+    }
+    return err({ kind: 'io', message: `could not read ${filePath}: ${errorMessage(error)}`, cause: error });
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return err({
+      kind: 'invalid-json',
+      message: `${filePath} existe pero no es JSON válido; arréglalo a mano y vuelve a correr rw adapters (no lo sobrescribí).`,
+    });
+  }
+  if (!isPlainObject(parsed)) {
+    return err({
+      kind: 'invalid-json',
+      message: `${filePath} existe pero no es un objeto JSON; arréglalo a mano y vuelve a correr rw adapters (no lo sobrescribí).`,
+    });
+  }
+  return ok(parsed);
+};
+
+// Read-merge-write a JSON config idempotently: `merge` gets the parsed (or empty)
+// object and returns the object to persist; the file is only rewritten when the
+// serialized bytes change, so a no-op re-run reports 'unchanged'.
+const mergeJsonConfig = async (
+  filePath: string,
+  merge: (base: JsonObject) => JsonObject,
+): Promise<Result<AdapterWrite, AdaptersError>> => {
+  const base = await readJsonConfig(filePath);
+  if (!base.ok) {
+    return base;
+  }
+  try {
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+  } catch (error) {
+    return err({
+      kind: 'io',
+      message: `could not create dir for ${filePath}: ${errorMessage(error)}`,
+      cause: error,
+    });
+  }
+  const written = await writeFileIdempotent(filePath, serializeJson(merge(base.value)));
+  if (!written.ok) {
+    return err({ kind: 'io', message: written.error.message, cause: written.error.cause });
+  }
+  return ok({ path: filePath, action: written.value.action });
+};
+
+// Claude Code discovers the MCP server from .mcp.json; `rw mcp` runs it over stdio.
+const mergeMcpJson = (base: JsonObject): JsonObject => {
+  const servers = isPlainObject(base.mcpServers) ? base.mcpServers : {};
+  // ADD/OVERWRITE only the rw-ai key; spreading preserves every other server and
+  // top-level key, and keeps existing key positions stable (so re-runs are no-ops).
+  return { ...base, mcpServers: { ...servers, 'rw-ai': { command: 'rw', args: ['mcp'] } } };
+};
+
+// The single stdin-driven guard command rw installs into a PreToolUse hook; also
+// the dedupe key so re-running never appends a duplicate group.
+const LANE_GUARD_COMMAND = 'rw lane-guard';
+
+// True when a PreToolUse matcher-group already runs the lane guard (checked by the
+// exact command string, per the dedupe contract).
+const groupRunsLaneGuard = (group: unknown): boolean => {
+  if (!isPlainObject(group) || !Array.isArray(group.hooks)) {
+    return false;
+  }
+  return group.hooks.some(
+    (hook) =>
+      isPlainObject(hook) && hook.type === 'command' && hook.command === LANE_GUARD_COMMAND,
+  );
+};
+
+// Claude Code runs PreToolUse hooks before Write/Edit/MultiEdit; rw adds a group
+// that shells out to the lane guard so a write outside the session's lane is blocked.
+const mergeSettingsJson = (base: JsonObject): JsonObject => {
+  const hooks = isPlainObject(base.hooks) ? base.hooks : {};
+  const preToolUse = Array.isArray(hooks.PreToolUse) ? hooks.PreToolUse : [];
+  // Idempotent + non-destructive: only append rw's group when no existing group
+  // already runs the guard; every other event, matcher-group and key is untouched.
+  const nextPreToolUse = preToolUse.some(groupRunsLaneGuard)
+    ? preToolUse
+    : [
+        ...preToolUse,
+        { matcher: 'Write|Edit|MultiEdit', hooks: [{ type: 'command', command: LANE_GUARD_COMMAND }] },
+      ];
+  return { ...base, hooks: { ...hooks, PreToolUse: nextPreToolUse } };
+};
+
+// OpenCode's local-MCP shape is confirmed from its docs: an `mcp.<name>` entry with
+// type 'local' and a command STRING ARRAY. Only the rw-ai key is added/overwritten;
+// $schema is added when absent so editors get completion, never overriding a set one.
+// NOTE: OpenCode's pre-write hook (`tool.execute.before`) is plugin-only (a TS file),
+// not a JSON entry, so the lane guard is NOT wired for OpenCode here — see README.
+const mergeOpencodeJson = (base: JsonObject): JsonObject => {
+  const mcp = isPlainObject(base.mcp) ? base.mcp : {};
+  const withSchema =
+    base.$schema === undefined ? { $schema: 'https://opencode.ai/config.json', ...base } : base;
+  return {
+    ...withSchema,
+    mcp: { ...mcp, 'rw-ai': { type: 'local', command: ['rw', 'mcp'], enabled: true } },
+  };
+};
+
+// The two Claude Code config files: the MCP server (.mcp.json) and the PreToolUse
+// lane-guard hook (.claude/settings.json). Split out because --worktrees replicates
+// exactly these two into each active worktree.
+const installClaudeConfigs = async (root: string): Promise<Result<AdapterWrite[], AdaptersError>> => {
+  const writes: AdapterWrite[] = [];
+  const mcp = await mergeJsonConfig(path.join(root, '.mcp.json'), mergeMcpJson);
+  if (!mcp.ok) {
+    return mcp;
+  }
+  writes.push(mcp.value);
+  const settings = await mergeJsonConfig(path.join(root, '.claude', 'settings.json'), mergeSettingsJson);
+  if (!settings.ok) {
+    return settings;
+  }
+  writes.push(settings.value);
+  return ok(writes);
+};
+
+// The full "inside the agent" config wiring at a shared root: the two Claude Code
+// files PLUS OpenCode's opencode.json MCP entry.
+const installAgentConfigs = async (root: string): Promise<Result<AdapterWrite[], AdaptersError>> => {
+  const claude = await installClaudeConfigs(root);
+  if (!claude.ok) {
+    return claude;
+  }
+  const opencode = await mergeJsonConfig(path.join(root, 'opencode.json'), mergeOpencodeJson);
+  if (!opencode.ok) {
+    return opencode;
+  }
+  return ok([...claude.value, opencode.value]);
+};
+
+export type InstallAdaptersOptions = {
+  // When true, the two Claude Code config files (.mcp.json + .claude/settings.json)
+  // are ALSO written into each active session worktree, so an agent started inside
+  // a worktree is wired there too. Default: only the shared project root.
+  readonly worktrees?: boolean;
+};
+
 // Writes the cross-agent adapters into a target repo, idempotently. Unlike the
 // board, these files are meant to be COMMITTED (never gitignored): re-running
 // rewrites only what changed, and config-derived content updates with the config.
+// Beyond the skills/command wrappers, it wires the WHOLE "inside the agent" model:
+// the MCP server config and the PreToolUse lane-guard hook, merged non-destructively.
 export const installAdapters = async (
   projectRoot: string,
   config: AgentsConfig,
+  options: InstallAdaptersOptions = {},
 ): Promise<Result<AdaptersInstallResult, AdaptersError>> => {
   const written: AdapterWrite[] = [];
   for (const { relPath, content } of planWrites(config)) {
@@ -347,5 +555,26 @@ export const installAdapters = async (
     }
     written.push({ path: filePath, action: result.value.action });
   }
+
+  // The MCP + hook wiring at the shared root (Claude Code .mcp.json/settings.json +
+  // OpenCode opencode.json). A non-JSON existing config aborts here without clobber.
+  const rootConfigs = await installAgentConfigs(projectRoot);
+  if (!rootConfigs.ok) {
+    return rootConfigs;
+  }
+  written.push(...rootConfigs.value);
+
+  // --worktrees: replicate the two Claude Code config files into each active
+  // worktree, so a per-worktree agent (resolving its session from the cwd) is wired.
+  if (options.worktrees === true) {
+    for (const session of activeSessions(config)) {
+      const worktreeConfigs = await installClaudeConfigs(path.join(projectRoot, session.worktree));
+      if (!worktreeConfigs.ok) {
+        return worktreeConfigs;
+      }
+      written.push(...worktreeConfigs.value);
+    }
+  }
+
   return ok({ written });
 };
