@@ -17,6 +17,7 @@ export type ScaffoldParams = {
   readonly projectName: string;
   readonly stacks: Stack[];
   readonly sessionCount: number;
+  readonly baseBranch?: string;
   readonly db?: DbDetection;
 };
 
@@ -41,6 +42,7 @@ export const scaffoldConfig = (params: ScaffoldParams): Result<AgentsConfig, Sca
     projectName: params.projectName,
     stacks,
     sessionCount: params.sessionCount,
+    ...(params.baseBranch !== undefined ? { baseBranch: params.baseBranch } : {}),
     ...(params.db !== undefined ? { db: toDbConfigInput(params.db) } : {}),
   });
   if (isErr(config)) {

@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { err } from '../../core/result.js';
 import { readAgentsConfig } from '../../engine/config-io.js';
 import type { CommandRunner } from '../../engine/exec.js';
-import { createTempRepo, type TempRepo } from '../../engine/git.test-support.js';
+import { createGit } from '../../engine/git.js';
+import { createTempRepo, runGitOrThrow, type TempRepo } from '../../engine/git.test-support.js';
 import type { CliDeps } from '../command.js';
 import { runScaffold } from './scaffold.js';
 
@@ -63,6 +64,36 @@ describe('runScaffold', () => {
     expect(result.exitCode).toBe(0);
     const config = await readAgentsConfig(repo.root);
     expect(config.ok && config.value.sessions).toHaveLength(3);
+  });
+
+  it("detects 'main' as the base branch on a standard repo", async () => {
+    const result = await runScaffold({}, deps(repo));
+    expect(result.exitCode).toBe(0);
+    expect(result.lines.join('\n')).toContain('main');
+    const config = await readAgentsConfig(repo.root);
+    expect(config.ok && config.value.git.baseBranch).toBe('main');
+  });
+
+  it("detects 'master' when the repo has no main branch", async () => {
+    await runGitOrThrow(repo.root, ['branch', '-m', 'main', 'master']);
+    const result = await runScaffold({}, deps(repo));
+    expect(result.exitCode).toBe(0);
+    const config = await readAgentsConfig(repo.root);
+    expect(config.ok).toBe(true);
+    if (config.ok) {
+      expect(config.value.git.baseBranch).toBe('master');
+      // Coherence: the recorded base branch actually exists, so rw configure's
+      // ensureIntegrationBranch step would not fail on a missing base branch.
+      const exists = await createGit(repo.root).branchExists(config.value.git.baseBranch);
+      expect(exists.ok && exists.value).toBe(true);
+    }
+  });
+
+  it('honors an explicit --base-branch override', async () => {
+    const result = await runScaffold({ baseBranch: 'custom' }, deps(repo));
+    expect(result.exitCode).toBe(0);
+    const config = await readAgentsConfig(repo.root);
+    expect(config.ok && config.value.git.baseBranch).toBe('custom');
   });
 
   it('exits 1 with a Spanish message when not inside a git repo', async () => {

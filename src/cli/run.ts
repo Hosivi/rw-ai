@@ -35,6 +35,7 @@ const OPTIONS = {
   sessions: { type: 'string' },
   stacks: { type: 'string' },
   db: { type: 'string' },
+  'base-branch': { type: 'string' },
   cwd: { type: 'string' },
   model: { type: 'string' },
   online: { type: 'boolean' },
@@ -52,7 +53,7 @@ const USAGE: readonly string[] = [
   'Uso: rw <comando> [opciones]',
   '',
   'Comandos:',
-  '  scaffold [--sessions <n>] [--stacks <a,b>] [--db <docker|local|supabase|none>] [--force]',
+  '  scaffold [--sessions <n>] [--stacks <a,b>] [--db <docker|local|supabase|none>] [--base-branch <rama>] [--force]',
   '                                 Detecta el stack y genera agents.config.json',
   '  configure                      Provisiona ramas, worktrees, bases de datos y el tablero',
   '  adapters                       Escribe los adaptadores (.claude/.opencode) y skills de rw',
@@ -208,11 +209,16 @@ const route = async (argv: readonly string[], deps: CliDeps): Promise<CommandRes
           `Estrategia de base de datos inválida '${values.db}'. Usa: docker, local, supabase o none.`,
         );
       }
+      const baseBranch = values['base-branch'];
+      if (baseBranch !== undefined && baseBranch.trim() === '') {
+        return usageError('Rama base inválida. Pasa un nombre de rama no vacío.');
+      }
       return runScaffold(
         {
           ...(sessions !== undefined ? { sessions } : {}),
           ...(stacks !== undefined ? { stacks } : {}),
           ...(db !== undefined ? { db } : {}),
+          ...(baseBranch !== undefined ? { baseBranch } : {}),
           ...(values.force === true ? { force: true } : {}),
         },
         deps,

@@ -138,6 +138,13 @@ describe('runCli', () => {
     expect(lines.join('\n')).toContain('Estrategia de base de datos inválida');
   });
 
+  it('exits 2 for an empty --base-branch value', async () => {
+    const { lines, deps } = capture();
+    const code = await runCli(['scaffold', '--base-branch='], deps);
+    expect(code).toBe(2);
+    expect(lines.join('\n')).toContain('Rama base inválida');
+  });
+
   it('routes scaffold to its handler (context error outside a repo)', async () => {
     const { lines, deps } = capture({ cwd: '/anywhere', run: gitNotARepo, runRaw: gitNotARepo });
     const code = await runCli(['scaffold'], deps);

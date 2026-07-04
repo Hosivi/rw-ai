@@ -1,7 +1,7 @@
 import type { DbStrategy, Stack } from '../../contract/schema.js';
 import { agentsConfigPath, readAgentsConfig, writeAgentsConfig } from '../../engine/config-io.js';
 import type { DbDetection } from '../../engine/database.js';
-import { detectProject } from '../../engine/detect.js';
+import { detectBaseBranch, detectProject } from '../../engine/detect.js';
 import { createGit } from '../../engine/git.js';
 import { scaffoldConfig } from '../../engine/scaffold.js';
 import type { CliDeps, CommandResult } from '../command.js';
@@ -15,6 +15,7 @@ export type ScaffoldArgs = {
   readonly sessions?: number;
   readonly stacks?: Stack[];
   readonly db?: DbStrategy;
+  readonly baseBranch?: string;
   readonly force?: boolean;
 };
 
@@ -34,7 +35,8 @@ const overrideDbStrategy = (detected: DbDetection, strategy: DbStrategy): DbDete
 export const runScaffold = async (args: ScaffoldArgs, deps: CliDeps): Promise<CommandResult> => {
   // 1. Resolve the repo root directly (loadContext would require an existing
   //    config — exactly what we are here to create).
-  const toplevel = await createGit(deps.cwd, deps.run, deps.runRaw).toplevel();
+  const git = createGit(deps.cwd, deps.run, deps.runRaw);
+  const toplevel = await git.toplevel();
   if (!toplevel.ok) {
     return {
       lines: [
@@ -73,11 +75,17 @@ export const runScaffold = async (args: ScaffoldArgs, deps: CliDeps): Promise<Co
   const db =
     args.db === undefined ? detection.db : overrideDbStrategy(detection.db, args.db);
 
+  // An explicit --base-branch wins; otherwise detect the repo's real base branch
+  // (main, else master, else the current branch) so it points at a branch that
+  // exists and `rw configure`'s integration-branch step does not fail.
+  const baseBranch = args.baseBranch ?? (await detectBaseBranch(git));
+
   // 4. Build and write the config.
   const scaffolded = scaffoldConfig({
     projectName: detection.projectName,
     stacks,
     sessionCount,
+    baseBranch,
     db,
   });
   if (!scaffolded.ok) {
@@ -105,6 +113,7 @@ export const runScaffold = async (args: ScaffoldArgs, deps: CliDeps): Promise<Co
     lines: [
       `Proyecto: ${detection.projectName}`,
       stacksLine,
+      `Rama base: ${baseBranch}`,
       `Estrategia de base de datos: ${db.strategy}`,
       `Sesiones configuradas: ${sessionCount}`,
       `Escribí ${agentsConfigPath(projectRoot)}`,
