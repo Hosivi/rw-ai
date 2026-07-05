@@ -9,6 +9,7 @@ import {
 } from '../contract/schema.js';
 import type { CliDeps, CommandResult } from './command.js';
 import { runAdapters } from './commands/adapters.js';
+import { runBootstrap } from './commands/bootstrap.js';
 import { runCheck } from './commands/check.js';
 import { runSessions } from './commands/claude-sessions.js';
 import { runConfigure } from './commands/configure.js';
@@ -38,6 +39,7 @@ const OPTIONS = {
   stacks: { type: 'string' },
   db: { type: 'string' },
   'base-branch': { type: 'string' },
+  remote: { type: 'string' },
   cwd: { type: 'string' },
   model: { type: 'string' },
   online: { type: 'boolean' },
@@ -56,6 +58,8 @@ const USAGE: readonly string[] = [
   'Uso: rw <comando> [opciones]',
   '',
   'Comandos:',
+  '  bootstrap [--sessions <n>] [--remote <url>] [--base-branch <rama>]',
+  '                                 Inicializa el repo (git init si hace falta) y lo configura de una sola vez',
   '  scaffold [--sessions <n>] [--stacks <a,b>] [--db <docker|local|supabase|none>] [--base-branch <rama>] [--force]',
   '                                 Detecta el stack y genera agents.config.json',
   '  configure                      Provisiona ramas, worktrees, bases de datos y el tablero',
@@ -198,6 +202,28 @@ const route = async (argv: readonly string[], deps: CliDeps): Promise<CommandRes
   }
 
   switch (command) {
+    case 'bootstrap': {
+      const sessions = parseSessions(values.sessions);
+      if (sessions === 'invalid') {
+        return usageError(`Sesiones inválidas '${values.sessions}'. Pasa un entero mayor que 0.`);
+      }
+      const baseBranch = values['base-branch'];
+      if (baseBranch !== undefined && baseBranch.trim() === '') {
+        return usageError('Rama base inválida. Pasa un nombre de rama no vacío.');
+      }
+      const remote = values.remote;
+      if (remote !== undefined && remote.trim() === '') {
+        return usageError('Remote inválido. Pasa una URL no vacía.');
+      }
+      return runBootstrap(
+        {
+          ...(sessions !== undefined ? { sessions } : {}),
+          ...(baseBranch !== undefined ? { baseBranch } : {}),
+          ...(remote !== undefined ? { remote } : {}),
+        },
+        deps,
+      );
+    }
     case 'scaffold': {
       const sessions = parseSessions(values.sessions);
       if (sessions === 'invalid') {
