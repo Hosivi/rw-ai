@@ -35,6 +35,7 @@ describe('runSessions', () => {
     env: {},
     now: NOW,
     homeDir: home,
+    platform: 'linux',
     ...overrides,
   });
 

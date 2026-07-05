@@ -19,6 +19,7 @@ const TTL_MS = 28_800_000;
 const deps = (repo: TempRepo, env: Record<string, string | undefined> = {}): CliDeps => ({
   cwd: repo.root,
   homeDir: repo.root,
+  platform: 'linux',
   env,
   now: NOW,
   interactive: false,
@@ -121,6 +122,7 @@ describe('command handlers (context failures)', () => {
   const brokenDeps: CliDeps = {
     cwd: '/anywhere',
     homeDir: '/anywhere',
+    platform: 'linux',
     env: {},
     now: NOW,
     run: gitNotARepo,

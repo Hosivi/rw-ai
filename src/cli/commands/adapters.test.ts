@@ -20,7 +20,7 @@ const NOW = new Date('2026-07-02T12:00:00.000Z');
 describe('runAdapters (CLI)', () => {
   let repo: TempRepo;
 
-  const deps = (): CliDeps => ({ cwd: repo.root, homeDir: repo.root, env: {}, now: NOW });
+  const deps = (): CliDeps => ({ cwd: repo.root, homeDir: repo.root, platform: 'linux', env: {}, now: NOW });
 
   beforeAll(async () => {
     repo = await createTempRepo();
@@ -78,7 +78,7 @@ describe('runAdapters --user (user scope)', () => {
   let home: string;
 
   // --user installs at the user scope only, so it needs no repo — just a homeDir.
-  const userDeps = (): CliDeps => ({ cwd: '/anywhere', homeDir: home, env: {}, now: NOW });
+  const userDeps = (): CliDeps => ({ cwd: '/anywhere', homeDir: home, platform: 'linux', env: {}, now: NOW });
 
   beforeAll(async () => {
     home = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'rw-ai-cli-userhome-')));
@@ -134,6 +134,7 @@ describe('runAdapters (context failure)', () => {
       {
         cwd: '/anywhere',
         homeDir: '/anywhere',
+        platform: 'linux',
         env: {},
         now: NOW,
         run: gitNotARepo,

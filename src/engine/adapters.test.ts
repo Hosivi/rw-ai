@@ -52,6 +52,18 @@ describe('renderSkill', () => {
   });
 });
 
+// The MCP command shapes rw writes, per platform. On Windows the global `rw` is a
+// `.cmd` shim and MCP stdio servers are spawned WITHOUT a shell, so rw must be
+// invoked through `cmd /c`; elsewhere `rw` is a normal executable, invoked directly.
+const CLAUDE_MCP = {
+  win32: { command: 'cmd', args: ['/c', 'rw', 'mcp'] },
+  linux: { command: 'rw', args: ['mcp'] },
+} as const;
+const OPENCODE_MCP = {
+  win32: { type: 'local', command: ['cmd', '/c', 'rw', 'mcp'], enabled: true },
+  linux: { type: 'local', command: ['rw', 'mcp'], enabled: true },
+} as const;
+
 describe('installAdapters', () => {
   let dir: string;
 
@@ -65,7 +77,7 @@ describe('installAdapters', () => {
 
   it('writes every skill and command wrapper into BOTH agent trees, all created', async () => {
     const config = buildConfig();
-    const result = unwrap(await installAdapters(dir, config));
+    const result = unwrap(await installAdapters(dir, config, 'linux'));
     expect(result.written.length).toBeGreaterThan(0);
 
     // Each skill lands under both the Claude Code and the OpenCode skills dir.
@@ -85,14 +97,14 @@ describe('installAdapters', () => {
 
   it('reports every file unchanged on a second identical run (idempotent)', async () => {
     const config = buildConfig();
-    unwrap(await installAdapters(dir, config));
-    const second = unwrap(await installAdapters(dir, config));
+    unwrap(await installAdapters(dir, config, 'linux'));
+    const second = unwrap(await installAdapters(dir, config, 'linux'));
     expect(second.written.every((write) => write.action === 'unchanged')).toBe(true);
   });
 
   it('reports the workflow skill updated when the config changes, others unchanged', async () => {
     const config = buildConfig();
-    unwrap(await installAdapters(dir, config));
+    unwrap(await installAdapters(dir, config, 'linux'));
 
     // Archiving s2 shrinks the active-session table, so only the config-derived
     // workflow skill changes; the static skills stay byte-identical.
@@ -102,7 +114,7 @@ describe('installAdapters', () => {
         session.id === 's2' ? { ...session, status: 'archived' } : session,
       ),
     };
-    const second = unwrap(await installAdapters(dir, archived));
+    const second = unwrap(await installAdapters(dir, archived, 'linux'));
 
     const workflowWrite = second.written.find((write) =>
       write.path.includes(path.join('.claude', 'skills', 'rw-workflow')),
@@ -117,7 +129,7 @@ describe('installAdapters', () => {
 
   it('never writes a .gitignore (adapter files are committed, not ignored)', async () => {
     const config = buildConfig();
-    const result = unwrap(await installAdapters(dir, config));
+    const result = unwrap(await installAdapters(dir, config, 'linux'));
     expect(existsSync(path.join(dir, '.gitignore'))).toBe(false);
     expect(result.written.some((write) => write.path.endsWith('.gitignore'))).toBe(false);
   });
@@ -136,12 +148,33 @@ describe('installAdapters — agent config wiring (MCP + hook)', () => {
   const readJson = async (rel: string): Promise<any> =>
     JSON.parse(await fs.readFile(path.join(dir, rel), 'utf8'));
 
-  it('writes .mcp.json (rw-ai server) and .claude/settings.json (lane-guard hook), idempotently', async () => {
-    const config = buildConfig();
-    unwrap(await installAdapters(dir, config));
+  // The rw-ai MCP server command is platform-aware: bare `rw` off Windows, but
+  // `cmd /c rw mcp` on Windows because the global `rw` is a `.cmd` shim and MCP
+  // stdio servers are spawned WITHOUT a shell. Assert BOTH shapes, end to end.
+  describe.each(['win32', 'linux'] as const)('on %s', (platform) => {
+    it('writes .mcp.json with the platform-aware rw-ai command, idempotently', async () => {
+      const config = buildConfig();
+      unwrap(await installAdapters(dir, config, platform));
 
-    const mcp = await readJson('.mcp.json');
-    expect(mcp.mcpServers['rw-ai']).toEqual({ command: 'rw', args: ['mcp'] });
+      const mcp = await readJson('.mcp.json');
+      expect(mcp.mcpServers['rw-ai']).toEqual(CLAUDE_MCP[platform]);
+
+      // Second identical run rewrites nothing for the MCP config file.
+      const second = unwrap(await installAdapters(dir, config, platform));
+      const mcpWrite = second.written.find((write) => write.path.endsWith('.mcp.json'));
+      expect(mcpWrite?.action).toBe('unchanged');
+    });
+
+    it('writes opencode.json with the platform-aware rw-ai MCP command', async () => {
+      unwrap(await installAdapters(dir, buildConfig(), platform));
+      const opencode = await readJson('opencode.json');
+      expect(opencode.mcp['rw-ai']).toEqual(OPENCODE_MCP[platform]);
+    });
+  });
+
+  it('writes the lane-guard hook into .claude/settings.json, idempotently', async () => {
+    const config = buildConfig();
+    unwrap(await installAdapters(dir, config, 'linux'));
 
     const settings = await readJson(path.join('.claude', 'settings.json'));
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -152,7 +185,7 @@ describe('installAdapters — agent config wiring (MCP + hook)', () => {
     expect(guard).toEqual({ type: 'command', command: 'rw lane-guard' });
 
     // Second identical run rewrites neither config file.
-    const second = unwrap(await installAdapters(dir, config));
+    const second = unwrap(await installAdapters(dir, config, 'linux'));
     const mcpWrite = second.written.find((write) => write.path.endsWith('.mcp.json'));
     expect(mcpWrite?.action).toBe('unchanged');
     const settingsWrite = second.written.find((write) =>
@@ -163,7 +196,7 @@ describe('installAdapters — agent config wiring (MCP + hook)', () => {
 
   it('registers a SessionStart hook running rw session-start, idempotent + non-destructive over PreToolUse', async () => {
     const config = buildConfig();
-    unwrap(await installAdapters(dir, config));
+    unwrap(await installAdapters(dir, config, 'linux'));
 
     const settings = await readJson(path.join('.claude', 'settings.json'));
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -181,7 +214,7 @@ describe('installAdapters — agent config wiring (MCP + hook)', () => {
     expect(laneGuard).toBeDefined();
 
     // Re-running appends no second SessionStart group.
-    unwrap(await installAdapters(dir, config));
+    unwrap(await installAdapters(dir, config, 'linux'));
     const settings2 = await readJson(path.join('.claude', 'settings.json'));
     const sessionStartCount = settings2.hooks.SessionStart.flatMap(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -189,12 +222,6 @@ describe('installAdapters — agent config wiring (MCP + hook)', () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ).filter((hook: any) => hook.command === 'rw session-start').length;
     expect(sessionStartCount).toBe(1);
-  });
-
-  it('writes opencode.json with the rw-ai MCP server (type local, command array)', async () => {
-    unwrap(await installAdapters(dir, buildConfig()));
-    const opencode = await readJson('opencode.json');
-    expect(opencode.mcp['rw-ai']).toEqual({ type: 'local', command: ['rw', 'mcp'], enabled: true });
   });
 
   it('merges non-destructively: preexisting servers/keys/hooks survive without duplication', async () => {
@@ -219,12 +246,12 @@ describe('installAdapters — agent config wiring (MCP + hook)', () => {
       'utf8',
     );
 
-    unwrap(await installAdapters(dir, buildConfig()));
+    unwrap(await installAdapters(dir, buildConfig(), 'linux'));
 
     const mcp = await readJson('.mcp.json');
     expect(mcp.mcpServers.other).toEqual({ command: 'other-bin', args: [] }); // preserved
     expect(mcp.custom).toBe(42); // preserved
-    expect(mcp.mcpServers['rw-ai']).toEqual({ command: 'rw', args: ['mcp'] }); // added
+    expect(mcp.mcpServers['rw-ai']).toEqual(CLAUDE_MCP.linux); // added
 
     const settings = await readJson(path.join('.claude', 'settings.json'));
     expect(settings.theme).toBe('dark'); // preserved
@@ -237,7 +264,7 @@ describe('installAdapters — agent config wiring (MCP + hook)', () => {
     expect(commands).toContain('rw lane-guard'); // added
 
     // Re-running must NOT append a second lane-guard group.
-    unwrap(await installAdapters(dir, buildConfig()));
+    unwrap(await installAdapters(dir, buildConfig(), 'linux'));
     const settings2 = await readJson(path.join('.claude', 'settings.json'));
     const laneGuardCount = settings2.hooks.PreToolUse.flatMap(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -250,7 +277,7 @@ describe('installAdapters — agent config wiring (MCP + hook)', () => {
   it('errors without clobbering when an existing .mcp.json is not valid JSON', async () => {
     const junk = '{ this is not json';
     await fs.writeFile(path.join(dir, '.mcp.json'), junk, 'utf8');
-    const result = await installAdapters(dir, buildConfig());
+    const result = await installAdapters(dir, buildConfig(), 'linux');
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.message).toContain('.mcp.json');
@@ -261,7 +288,7 @@ describe('installAdapters — agent config wiring (MCP + hook)', () => {
 
   it('--worktrees replicates the two Claude Code config files into each active worktree', async () => {
     const config = buildConfig(); // s1 -> .worktrees/s1, s2 -> .worktrees/s2
-    unwrap(await installAdapters(dir, config, { worktrees: true }));
+    unwrap(await installAdapters(dir, config, 'linux', { worktrees: true }));
     for (const session of config.sessions) {
       expect(existsSync(path.join(dir, session.worktree, '.mcp.json'))).toBe(true);
       expect(existsSync(path.join(dir, session.worktree, '.claude', 'settings.json'))).toBe(true);
@@ -284,38 +311,43 @@ describe('installUserAdapters (user scope)', () => {
   const readHomeJson = async (...rel: string[]): Promise<any> =>
     JSON.parse(await fs.readFile(path.join(home, ...rel), 'utf8'));
 
-  it('writes the MCP server to ~/.claude.json, hooks to ~/.claude/settings.json, and OpenCode global config', async () => {
-    const result = unwrap(await installUserAdapters(home));
-    expect(result.written.length).toBe(3);
-    expect(result.written.every((write) => write.action === 'created')).toBe(true);
+  // The user scope is the machine-wide install (`rw adapters --user`), so its MCP
+  // command must be platform-aware exactly like the project scope: `cmd /c rw mcp`
+  // on Windows, bare `rw mcp` elsewhere. This is the path that failed to spawn.
+  describe.each(['win32', 'linux'] as const)('on %s', (platform) => {
+    it('writes the MCP server to ~/.claude.json, hooks to ~/.claude/settings.json, and OpenCode global config', async () => {
+      const result = unwrap(await installUserAdapters(home, platform));
+      expect(result.written.length).toBe(3);
+      expect(result.written.every((write) => write.action === 'created')).toBe(true);
 
-    // Claude Code user-scoped MCP server → ~/.claude.json (NOT settings.json).
-    const claudeJson = await readHomeJson('.claude.json');
-    expect(claudeJson.mcpServers['rw-ai']).toEqual({ command: 'rw', args: ['mcp'] });
+      // Claude Code user-scoped MCP server → ~/.claude.json (NOT settings.json).
+      const claudeJson = await readHomeJson('.claude.json');
+      expect(claudeJson.mcpServers['rw-ai']).toEqual(CLAUDE_MCP[platform]);
 
-    // Claude Code user-scoped hooks → ~/.claude/settings.json (both hooks).
-    const settings = await readHomeJson('.claude', 'settings.json');
-    const commands = settings.hooks.PreToolUse.flatMap(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (group: any) => group.hooks,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ).map((hook: any) => hook.command);
-    expect(commands).toContain('rw lane-guard');
-    const startCommands = settings.hooks.SessionStart.flatMap(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (group: any) => group.hooks,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ).map((hook: any) => hook.command);
-    expect(startCommands).toContain('rw session-start');
+      // Claude Code user-scoped hooks → ~/.claude/settings.json (both hooks).
+      const settings = await readHomeJson('.claude', 'settings.json');
+      const commands = settings.hooks.PreToolUse.flatMap(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (group: any) => group.hooks,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ).map((hook: any) => hook.command);
+      expect(commands).toContain('rw lane-guard');
+      const startCommands = settings.hooks.SessionStart.flatMap(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (group: any) => group.hooks,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ).map((hook: any) => hook.command);
+      expect(startCommands).toContain('rw session-start');
 
-    // OpenCode global config → ~/.config/opencode/opencode.json.
-    const opencode = await readHomeJson('.config', 'opencode', 'opencode.json');
-    expect(opencode.mcp['rw-ai']).toEqual({ type: 'local', command: ['rw', 'mcp'], enabled: true });
+      // OpenCode global config → ~/.config/opencode/opencode.json.
+      const opencode = await readHomeJson('.config', 'opencode', 'opencode.json');
+      expect(opencode.mcp['rw-ai']).toEqual(OPENCODE_MCP[platform]);
+    });
   });
 
   it('is idempotent: a second run rewrites nothing', async () => {
-    unwrap(await installUserAdapters(home));
-    const second = unwrap(await installUserAdapters(home));
+    unwrap(await installUserAdapters(home, 'linux'));
+    const second = unwrap(await installUserAdapters(home, 'linux'));
     expect(second.written.every((write) => write.action === 'unchanged')).toBe(true);
   });
 
@@ -349,13 +381,13 @@ describe('installUserAdapters (user scope)', () => {
       'utf8',
     );
 
-    unwrap(await installUserAdapters(home));
+    unwrap(await installUserAdapters(home, 'linux'));
 
     const claudeJson = await readHomeJson('.claude.json');
     expect(claudeJson.projects['/some/repo']).toEqual({ allowedTools: [] }); // preserved
     expect(claudeJson.numStartups).toBe(7); // preserved
     expect(claudeJson.mcpServers.other).toEqual({ command: 'other-bin', args: [] }); // preserved
-    expect(claudeJson.mcpServers['rw-ai']).toEqual({ command: 'rw', args: ['mcp'] }); // added
+    expect(claudeJson.mcpServers['rw-ai']).toEqual(CLAUDE_MCP.linux); // added
 
     const settings = await readHomeJson('.claude', 'settings.json');
     expect(settings.theme).toBe('dark'); // preserved

@@ -29,7 +29,7 @@ describe('runLaneGuard', () => {
   let mcp: McpRepo;
 
   const guard = (cwd: string, stdin: string) =>
-    runLaneGuard({ cwd, homeDir: cwd, env: {}, now: NOW, stdin });
+    runLaneGuard({ cwd, homeDir: cwd, platform: 'linux', env: {}, now: NOW, stdin });
 
   beforeEach(async () => {
     mcp = await setupMcpRepo(lanedConfig());

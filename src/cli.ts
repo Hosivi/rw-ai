@@ -39,6 +39,7 @@ const main = async (): Promise<void> => {
   const code = await runCli(process.argv.slice(2), {
     cwd: process.cwd(),
     homeDir: os.homedir(),
+    platform: process.platform,
     env: process.env,
     now: new Date(),
     write: (s) => console.log(s),

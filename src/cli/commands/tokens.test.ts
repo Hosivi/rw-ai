@@ -26,6 +26,7 @@ describe('runTokens (offline estimate + pricing, through a real repo)', () => {
   const deps = (env: Record<string, string | undefined> = {}): CliDeps => ({
     cwd: repo.root,
     homeDir: repo.root,
+    platform: 'linux',
     env,
     now: NOW,
   });
@@ -90,7 +91,7 @@ describe('runTokens (offline estimate + pricing, through a real repo)', () => {
 describe('runTokens (missing pricing.json)', () => {
   let repo: TempRepo;
 
-  const deps = (): CliDeps => ({ cwd: repo.root, homeDir: repo.root, env: {}, now: NOW });
+  const deps = (): CliDeps => ({ cwd: repo.root, homeDir: repo.root, platform: 'linux', env: {}, now: NOW });
 
   beforeAll(async () => {
     repo = await createTempRepo();

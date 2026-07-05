@@ -433,13 +433,29 @@ const mergeJsonConfig = async (
   return ok({ path: filePath, action: written.value.action });
 };
 
+// The spawnable form of `rw mcp`, per platform. On Windows the global `rw` is a
+// `.cmd` shim and MCP stdio servers are spawned WITHOUT a shell (which cannot
+// launch a `.cmd`), so rw must be invoked through `cmd /c`; off Windows `rw` is a
+// normal executable, invoked directly. Same class of problem cross-spawn solves
+// for rw's own subprocesses (see exec.ts) — here applied to the command rw writes
+// into the MCP configs. Kept pure: the platform is passed in, never read from
+// process, so both branches are reachable in tests on any host.
+type RwMcpCommand = { readonly command: string; readonly args: readonly string[] };
+const rwMcpCommand = (platform: NodeJS.Platform): RwMcpCommand =>
+  platform === 'win32'
+    ? { command: 'cmd', args: ['/c', 'rw', 'mcp'] }
+    : { command: 'rw', args: ['mcp'] };
+
 // Claude Code discovers the MCP server from .mcp.json; `rw mcp` runs it over stdio.
-const mergeMcpJson = (base: JsonObject): JsonObject => {
-  const servers = isPlainObject(base.mcpServers) ? base.mcpServers : {};
-  // ADD/OVERWRITE only the rw-ai key; spreading preserves every other server and
-  // top-level key, and keeps existing key positions stable (so re-runs are no-ops).
-  return { ...base, mcpServers: { ...servers, 'rw-ai': { command: 'rw', args: ['mcp'] } } };
-};
+// Curried by platform so the merge stays a pure (base) => object for mergeJsonConfig.
+const mergeMcpJson =
+  (platform: NodeJS.Platform) =>
+  (base: JsonObject): JsonObject => {
+    const servers = isPlainObject(base.mcpServers) ? base.mcpServers : {};
+    // ADD/OVERWRITE only the rw-ai key; spreading preserves every other server and
+    // top-level key, and keeps existing key positions stable (so re-runs are no-ops).
+    return { ...base, mcpServers: { ...servers, 'rw-ai': rwMcpCommand(platform) } };
+  };
 
 // The two stdin-driven commands rw installs as Claude Code hooks. Each command
 // string is ALSO its dedupe key, so re-running never appends a duplicate group.
@@ -497,22 +513,31 @@ const mergeSettingsJson = (base: JsonObject): JsonObject => {
 // $schema is added when absent so editors get completion, never overriding a set one.
 // NOTE: OpenCode's pre-write hook (`tool.execute.before`) is plugin-only (a TS file),
 // not a JSON entry, so the lane guard is NOT wired for OpenCode here — see README.
-const mergeOpencodeJson = (base: JsonObject): JsonObject => {
-  const mcp = isPlainObject(base.mcp) ? base.mcp : {};
-  const withSchema =
-    base.$schema === undefined ? { $schema: 'https://opencode.ai/config.json', ...base } : base;
-  return {
-    ...withSchema,
-    mcp: { ...mcp, 'rw-ai': { type: 'local', command: ['rw', 'mcp'], enabled: true } },
+// Curried by platform like mergeMcpJson: OpenCode wants the command as a STRING
+// ARRAY, so the platform-aware command is flattened to [command, ...args] — on
+// Windows `['cmd','/c','rw','mcp']`, elsewhere `['rw','mcp']`.
+const mergeOpencodeJson =
+  (platform: NodeJS.Platform) =>
+  (base: JsonObject): JsonObject => {
+    const mcp = isPlainObject(base.mcp) ? base.mcp : {};
+    const withSchema =
+      base.$schema === undefined ? { $schema: 'https://opencode.ai/config.json', ...base } : base;
+    const { command, args } = rwMcpCommand(platform);
+    return {
+      ...withSchema,
+      mcp: { ...mcp, 'rw-ai': { type: 'local', command: [command, ...args], enabled: true } },
+    };
   };
-};
 
 // The two Claude Code config files: the MCP server (.mcp.json) and the PreToolUse
 // lane-guard hook (.claude/settings.json). Split out because --worktrees replicates
 // exactly these two into each active worktree.
-const installClaudeConfigs = async (root: string): Promise<Result<AdapterWrite[], AdaptersError>> => {
+const installClaudeConfigs = async (
+  root: string,
+  platform: NodeJS.Platform,
+): Promise<Result<AdapterWrite[], AdaptersError>> => {
   const writes: AdapterWrite[] = [];
-  const mcp = await mergeJsonConfig(path.join(root, '.mcp.json'), mergeMcpJson);
+  const mcp = await mergeJsonConfig(path.join(root, '.mcp.json'), mergeMcpJson(platform));
   if (!mcp.ok) {
     return mcp;
   }
@@ -527,12 +552,15 @@ const installClaudeConfigs = async (root: string): Promise<Result<AdapterWrite[]
 
 // The full "inside the agent" config wiring at a shared root: the two Claude Code
 // files PLUS OpenCode's opencode.json MCP entry.
-const installAgentConfigs = async (root: string): Promise<Result<AdapterWrite[], AdaptersError>> => {
-  const claude = await installClaudeConfigs(root);
+const installAgentConfigs = async (
+  root: string,
+  platform: NodeJS.Platform,
+): Promise<Result<AdapterWrite[], AdaptersError>> => {
+  const claude = await installClaudeConfigs(root, platform);
   if (!claude.ok) {
     return claude;
   }
-  const opencode = await mergeJsonConfig(path.join(root, 'opencode.json'), mergeOpencodeJson);
+  const opencode = await mergeJsonConfig(path.join(root, 'opencode.json'), mergeOpencodeJson(platform));
   if (!opencode.ok) {
     return opencode;
   }
@@ -554,9 +582,10 @@ const installAgentConfigs = async (root: string): Promise<Result<AdapterWrite[],
 //   - OpenCode MCP servers    → ~/.config/opencode/opencode.json under `mcp`.
 export const installUserAdapters = async (
   homeDir: string,
+  platform: NodeJS.Platform,
 ): Promise<Result<AdaptersInstallResult, AdaptersError>> => {
   const written: AdapterWrite[] = [];
-  const claudeMcp = await mergeJsonConfig(path.join(homeDir, '.claude.json'), mergeMcpJson);
+  const claudeMcp = await mergeJsonConfig(path.join(homeDir, '.claude.json'), mergeMcpJson(platform));
   if (!claudeMcp.ok) {
     return claudeMcp;
   }
@@ -571,7 +600,7 @@ export const installUserAdapters = async (
   written.push(claudeSettings.value);
   const opencode = await mergeJsonConfig(
     path.join(homeDir, '.config', 'opencode', 'opencode.json'),
-    mergeOpencodeJson,
+    mergeOpencodeJson(platform),
   );
   if (!opencode.ok) {
     return opencode;
@@ -602,6 +631,7 @@ export type InstallAdaptersOptions = {
 export const installAdapters = async (
   projectRoot: string,
   config: AgentsConfig,
+  platform: NodeJS.Platform,
   options: InstallAdaptersOptions = {},
 ): Promise<Result<AdaptersInstallResult, AdaptersError>> => {
   // User scope short-circuits: only the machine-wide config files under homeDir are
@@ -610,7 +640,7 @@ export const installAdapters = async (
   if (options.user === true) {
     return options.homeDir === undefined
       ? err({ kind: 'io', message: 'la instalación a nivel usuario requiere homeDir' })
-      : installUserAdapters(options.homeDir);
+      : installUserAdapters(options.homeDir, platform);
   }
 
   const written: AdapterWrite[] = [];
@@ -634,7 +664,7 @@ export const installAdapters = async (
 
   // The MCP + hook wiring at the shared root (Claude Code .mcp.json/settings.json +
   // OpenCode opencode.json). A non-JSON existing config aborts here without clobber.
-  const rootConfigs = await installAgentConfigs(projectRoot);
+  const rootConfigs = await installAgentConfigs(projectRoot, platform);
   if (!rootConfigs.ok) {
     return rootConfigs;
   }
@@ -644,7 +674,10 @@ export const installAdapters = async (
   // worktree, so a per-worktree agent (resolving its session from the cwd) is wired.
   if (options.worktrees === true) {
     for (const session of activeSessions(config)) {
-      const worktreeConfigs = await installClaudeConfigs(path.join(projectRoot, session.worktree));
+      const worktreeConfigs = await installClaudeConfigs(
+        path.join(projectRoot, session.worktree),
+        platform,
+      );
       if (!worktreeConfigs.ok) {
         return worktreeConfigs;
       }

@@ -12,7 +12,7 @@ const NOW = new Date('2026-07-02T12:00:00.000Z');
 describe('runArchive / runAddSession failure exit codes', () => {
   let repo: TempRepo;
 
-  const deps = (): CliDeps => ({ cwd: repo.root, homeDir: repo.root, env: {}, now: NOW });
+  const deps = (): CliDeps => ({ cwd: repo.root, homeDir: repo.root, platform: 'linux', env: {}, now: NOW });
 
   beforeEach(async () => {
     repo = await createTempRepo();

@@ -23,7 +23,7 @@ const lanedConfig = (): AgentsConfig => {
 describe('runLane', () => {
   let mcp: McpRepo;
 
-  const depsAt = (cwd: string): CliDeps => ({ cwd, homeDir: cwd, env: {}, now: NOW });
+  const depsAt = (cwd: string): CliDeps => ({ cwd, homeDir: cwd, platform: 'linux', env: {}, now: NOW });
 
   beforeEach(async () => {
     mcp = await setupMcpRepo(lanedConfig());
@@ -67,7 +67,7 @@ describe('runLane', () => {
       err({ kind: 'non-zero-exit', output: { stdout: '', stderr: 'fatal', exitCode: 128 } });
     const result = await runLane(
       { path: 'src/s1/widget.ts' },
-      { cwd: '/anywhere', homeDir: '/anywhere', env: {}, now: NOW, run: notARepo, runRaw: notARepo },
+      { cwd: '/anywhere', homeDir: '/anywhere', platform: 'linux', env: {}, now: NOW, run: notARepo, runRaw: notARepo },
     );
     expect(result.exitCode).toBe(1);
   });

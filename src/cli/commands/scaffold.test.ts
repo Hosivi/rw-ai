@@ -13,7 +13,7 @@ const NOW = new Date('2026-07-02T12:00:00.000Z');
 
 // Non-interactive so scaffolding uses detected values / defaults silently — the
 // interactive prompt is never driven with real keypresses.
-const deps = (repo: TempRepo): CliDeps => ({ cwd: repo.root, homeDir: repo.root, env: {}, now: NOW, interactive: false });
+const deps = (repo: TempRepo): CliDeps => ({ cwd: repo.root, homeDir: repo.root, platform: 'linux', env: {}, now: NOW, interactive: false });
 
 describe('runScaffold', () => {
   let repo: TempRepo;
@@ -102,6 +102,7 @@ describe('runScaffold', () => {
     const brokenDeps: CliDeps = {
       cwd: '/anywhere',
       homeDir: '/anywhere',
+      platform: 'linux',
       env: {},
       now: NOW,
       interactive: false,

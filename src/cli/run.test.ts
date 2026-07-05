@@ -24,6 +24,7 @@ const capture = (
   const deps: CliDeps = {
     cwd: process.cwd(),
     homeDir: process.cwd(),
+    platform: 'linux',
     env: {},
     now: NOW,
     write: (line) => lines.push(line),

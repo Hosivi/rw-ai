@@ -29,6 +29,7 @@ describe('runSessionStart', () => {
     const deps: CliDeps & { readonly stdin: string } = {
       cwd: over.cwd,
       homeDir: over.cwd,
+      platform: 'linux',
       env: {},
       now: NOW,
       stdin: over.stdin,

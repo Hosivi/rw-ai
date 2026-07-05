@@ -62,6 +62,7 @@ describe('runBootstrap on a fresh directory', () => {
     const deps: CliDeps = {
       cwd: dir,
       homeDir: dir,
+      platform: 'linux',
       env: {},
       now: NOW,
       interactive: false,
@@ -100,6 +101,7 @@ describe('runBootstrap on an already-configured repo', () => {
     const deps: CliDeps = {
       cwd: repo.root,
       homeDir: repo.root,
+      platform: 'linux',
       env: {},
       now: NOW,
       interactive: false,

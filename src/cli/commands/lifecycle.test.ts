@@ -17,6 +17,7 @@ describe('runFinish (CLI boundary)', () => {
   const deps = (env: Record<string, string | undefined> = {}): CliDeps => ({
     cwd: repo.root,
     homeDir: repo.root,
+    platform: 'linux',
     env,
     now: NOW,
   });

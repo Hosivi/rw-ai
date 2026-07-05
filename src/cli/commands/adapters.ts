@@ -29,7 +29,7 @@ const writeSummary = (written: readonly AdapterWrite[]): string => {
 // which user-scoped files were written (an honest contract about what changed) and
 // carries the documented OpenCode hook gap.
 const runUserAdapters = async (deps: CliDeps): Promise<CommandResult> => {
-  const result = await installUserAdapters(deps.homeDir);
+  const result = await installUserAdapters(deps.homeDir, deps.platform);
   if (!result.ok) {
     return {
       lines: [`Error al escribir los adaptadores a nivel usuario: ${result.error.message}`],
@@ -56,7 +56,7 @@ export const runAdapters = async (args: AdaptersArgs, deps: CliDeps): Promise<Co
   if (!context.ok) {
     return contextErrorResult(context.error);
   }
-  const result = await installAdapters(context.value.projectRoot, context.value.config, {
+  const result = await installAdapters(context.value.projectRoot, context.value.config, deps.platform, {
     ...(args.worktrees === true ? { worktrees: true } : {}),
   });
   if (!result.ok) {
