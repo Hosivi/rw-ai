@@ -18,6 +18,7 @@ import { runLane } from './commands/lane.js';
 import { runLaneGuard } from './commands/lane-guard.js';
 import { runFinish } from './commands/lifecycle.js';
 import { runScaffold } from './commands/scaffold.js';
+import { runSessionStart } from './commands/session-start.js';
 import { runAddSession, runArchive } from './commands/sessions.js';
 import { runTokens } from './commands/tokens.js';
 import { printLines } from './output.js';
@@ -79,6 +80,7 @@ const USAGE: readonly string[] = [
   '  check                          Analiza la integración y detecta conflictos/invasiones',
   '  lane <ruta>                    Verifica si una ruta cae dentro de las áreas de tu sesión (0 permitido, 3 invasión)',
   '  lane-guard                     Hook PreToolUse (lee el payload por stdin y bloquea escrituras fuera de carril); no es para uso manual',
+  '  session-start                  Hook SessionStart (lee el payload por stdin y ofrece/orienta rw al abrir la sesión); no es para uso manual',
   '  sessions [--cwd <ruta>] [--claim]   Lista los jobs de Claude Code de la máquina',
   '  tokens [rutas...] [--model <id>] [--online]   Estima tokens y costo del contenido',
   '  mcp                            Inicia el servidor MCP (para que Claude Code / OpenCode usen rw como herramientas nativas)',
@@ -283,6 +285,10 @@ const route = async (argv: readonly string[], deps: CliDeps): Promise<CommandRes
     case 'lane-guard':
       // The PreToolUse hook: the bin threads the real stdin through deps.stdin.
       return runLaneGuard({ ...deps, stdin: deps.stdin ?? '' });
+    case 'session-start':
+      // The SessionStart hook: like lane-guard, it consumes the stdin payload the
+      // bin slurps. Fail-open, so a missing stdin is just an empty payload.
+      return runSessionStart({ ...deps, stdin: deps.stdin ?? '' });
     case 'sessions':
       return runSessions({ cwd: values.cwd, claim: values.claim === true }, deps);
     case 'tokens':

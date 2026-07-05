@@ -186,6 +186,25 @@ describe('runCli', () => {
     expect(text).toContain('pricing.json');
   });
 
+  it('lists the session-start hook in --help', async () => {
+    const { lines, deps } = capture();
+    const code = await runCli(['--help'], deps);
+    expect(code).toBe(0);
+    expect(lines.join('\n')).toContain('session-start');
+  });
+
+  it('routes session-start and fails open (exit 0) outside a repo', async () => {
+    // The SessionStart hook must never break startup: even outside a repo it emits
+    // the offer context and exits 0, proving it was routed (not unknown).
+    const { lines, deps } = capture({ cwd: '/anywhere', run: gitNotARepo, runRaw: gitNotARepo });
+    const code = await runCli(['session-start'], deps);
+    expect(code).toBe(0);
+    const text = lines.join('\n');
+    expect(text).not.toContain('Comando desconocido');
+    expect(text).toContain('rw_bootstrap');
+    expect(text).toContain('SessionStart');
+  });
+
   it('routes a real command to its handler', async () => {
     const { lines, deps } = capture({ cwd: '/anywhere', run: gitNotARepo, runRaw: gitNotARepo });
     const code = await runCli(['roles'], deps);

@@ -3,9 +3,14 @@ import os from 'node:os';
 import { runCli } from './cli/run.js';
 import { startRwMcpServer } from './mcp/server.js';
 
-// Slurp STDIN to a string. Only `rw lane-guard` needs it (Claude Code delivers the
-// PreToolUse payload on stdin). A TTY means no piped payload — return '' so a human
-// who runs the hook by hand fails open (empty payload → allow) instead of hanging.
+// The stdin-driven hooks: both read a Claude Code hook payload from stdin (the
+// PreToolUse payload for `lane-guard`, the SessionStart payload for `session-start`).
+// Every other command leaves stdin untouched.
+const STDIN_COMMANDS = new Set(['lane-guard', 'session-start']);
+
+// Slurp STDIN to a string. Only the hook commands need it (Claude Code delivers the
+// hook payload on stdin). A TTY means no piped payload — return '' so a human who
+// runs the hook by hand fails open (empty payload) instead of hanging.
 const readStdin = async (): Promise<string> => {
   if (process.stdin.isTTY === true) {
     return '';
@@ -28,9 +33,9 @@ const main = async (): Promise<void> => {
     await startRwMcpServer();
     return;
   }
-  // Only the hook consumes stdin; every other command leaves it untouched so the
-  // change stays isolated to `rw lane-guard`.
-  const stdin = process.argv[2] === 'lane-guard' ? await readStdin() : undefined;
+  // Only the hooks consume stdin; every other command leaves it untouched so the
+  // change stays isolated to the stdin-driven hook commands.
+  const stdin = STDIN_COMMANDS.has(process.argv[2] ?? '') ? await readStdin() : undefined;
   const code = await runCli(process.argv.slice(2), {
     cwd: process.cwd(),
     homeDir: os.homedir(),
