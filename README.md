@@ -88,9 +88,10 @@ Los ejemplos de abajo usan `rw`.
 
 | Comando | Qué hace |
 | --- | --- |
+| `rw bootstrap` | Inicializa el repo de una sola vez (git init si hace falta, escribe `agents.config.json`, primer commit y `configure`) |
 | `rw scaffold` | Detecta el stack y genera `agents.config.json` |
 | `rw configure` | Provisiona ramas, worktrees, bases de datos y el tablero |
-| `rw adapters [--worktrees]` | Escribe la config del agente (MCP + hook), los adaptadores (`.claude`/`.opencode`) y skills de rw |
+| `rw adapters [--worktrees] [--user]` | Escribe la config del agente (MCP + hooks), los adaptadores (`.claude`/`.opencode`) y skills de rw. `--user` instala a nivel usuario (ver [rw en toda sesión](#rw-en-toda-sesión-instalar-a-nivel-usuario)) |
 | `rw roles` | Lista los roles y su estado (libre/ocupado) |
 | `rw init` | Elige y reclama un rol (interactivo si no pasas `--role`) |
 | `rw claim <rol>` | Reclama un rol específico sin interacción |
@@ -102,6 +103,7 @@ Los ejemplos de abajo usan `rw`.
 | `rw check` | Analiza la integración y detecta conflictos/invasiones |
 | `rw lane <ruta>` | Verifica si una ruta cae dentro de las áreas de tu sesión (sale 0 si está permitida, 3 si es invasión) |
 | `rw lane-guard` | Hook `PreToolUse` para agentes: lee el payload por stdin y bloquea escrituras fuera de carril (no es para uso manual) |
+| `rw session-start` | Hook `SessionStart` para agentes: al abrir la sesión, surface rw y OFRECE `rw_bootstrap` si el repo no está configurado (no es para uso manual) |
 | `rw sessions` | Lista los jobs de Claude Code de la máquina (el store en `~/.claude/jobs`, distinto de las sesiones git de rw) |
 | `rw tokens [rutas...]` | Estima tokens y costo del contenido (`--model <id>`, `--online` para conteo exacto) |
 
@@ -143,11 +145,18 @@ Si ya existe una configuración, `rw scaffold` no la pisa: te avisa y te pide `-
   { "mcpServers": { "rw-ai": { "command": "rw", "args": ["mcp"] } } }
   ```
 
-- `.claude/settings.json` — agrega un grupo `PreToolUse` que corre el guard de carril (preserva cualquier otro hook y clave; no duplica el grupo al re-correr):
+- `.claude/settings.json` — agrega dos hooks (preserva cualquier otro hook y clave; no duplica un grupo al re-correr, deduplicado por el string del comando): un grupo `PreToolUse` que corre el guard de carril y un grupo `SessionStart` que corre `rw session-start` para surface/ofrecer rw al abrir la sesión:
 
   ```json
-  { "hooks": { "PreToolUse": [ { "matcher": "Write|Edit|MultiEdit", "hooks": [ { "type": "command", "command": "rw lane-guard" } ] } ] } }
+  {
+    "hooks": {
+      "PreToolUse": [ { "matcher": "Write|Edit|MultiEdit", "hooks": [ { "type": "command", "command": "rw lane-guard" } ] } ],
+      "SessionStart": [ { "hooks": [ { "type": "command", "command": "rw session-start" } ] } ]
+    }
+  }
   ```
+
+  > El grupo `SessionStart` va **sin `matcher`** a propósito: en Claude Code el matcher de `SessionStart` filtra por fuente (`startup|resume|clear|compact`) y omitirlo hace que el hook dispare en TODA apertura de sesión, que es justo lo que rw quiere. El hook **falla en abierto** (siempre sale 0) para no romper nunca el arranque de la sesión, y en un repo sin configurar OFRECE `rw_bootstrap` sin ejecutar nada por su cuenta.
 
 **OpenCode** — `opencode.json`, fusionado sin pisar lo tuyo, con el servidor MCP `rw-ai`:
 
@@ -167,6 +176,60 @@ Por defecto la config se escribe **solo en la raíz compartida** del repo. Con `
 rw adapters              # solo la raíz compartida
 rw adapters --worktrees  # además, cada worktree de sesión activa
 ```
+
+## rw en toda sesión (instalar a nivel usuario)
+
+Por defecto `rw adapters` cablea rw **por proyecto**. Con `rw adapters --user` instalas el servidor MCP y los hooks de rw **a nivel usuario**, para que rw aparezca en **TODAS** tus sesiones de Claude Code y OpenCode en la máquina, sin tener que configurar cada repo.
+
+```bash
+rw adapters --user
+```
+
+Es una instalación **global**: no necesita un repo configurado (ni siquiera un repo), así que puedes correrlo desde cualquier carpeta. **No escribe nada en el proyecto**; solo toca tu directorio de usuario, de forma **no destructiva** e **idempotente** (fusiona: preserva todo lo que ya tengas y no duplica nada al re-correr).
+
+### Qué archivos escribe a nivel usuario
+
+Las ubicaciones son las que documenta Claude Code / OpenCode y son **distintas** a las del proyecto:
+
+- **`~/.claude.json`** — el servidor MCP `rw-ai` bajo la clave `mcpServers` (es el mismo archivo donde Claude Code guarda los servidores de `claude mcp add --scope user`). Este archivo también guarda tus proyectos e historial: la fusión los **preserva intactos** y solo agrega/actualiza la clave `rw-ai`.
+
+  ```json
+  { "mcpServers": { "rw-ai": { "command": "rw", "args": ["mcp"] } } }
+  ```
+
+- **`~/.claude/settings.json`** — los hooks de usuario (aplican a todo proyecto): el grupo `PreToolUse` (`rw lane-guard`) y el grupo `SessionStart` (`rw session-start`).
+
+  ```json
+  {
+    "hooks": {
+      "PreToolUse": [ { "matcher": "Write|Edit|MultiEdit", "hooks": [ { "type": "command", "command": "rw lane-guard" } ] } ],
+      "SessionStart": [ { "hooks": [ { "type": "command", "command": "rw session-start" } ] } ]
+    }
+  }
+  ```
+
+- **`~/.config/opencode/opencode.json`** — el servidor MCP `rw-ai` global de OpenCode (bajo `mcp`), que aplica a todas tus sesiones de OpenCode.
+
+  ```json
+  { "mcp": { "rw-ai": { "type": "local", "command": ["rw", "mcp"], "enabled": true } } }
+  ```
+
+El comando imprime exactamente **qué archivos escribió** para que sepas qué cambió en tu directorio de usuario.
+
+### El hook SessionStart (ofrecer, nunca actuar)
+
+Con rw a nivel usuario, cada vez que abres una sesión el hook `SessionStart` (`rw session-start`) le dice al agente que rw está disponible:
+
+- En un directorio **sin configurar** (no es un repo git, o es un repo sin `agents.config.json`), el hook **OFRECE** `rw_bootstrap` (o `rw bootstrap`) para inicializar git + sesiones aisladas — pero **NO ejecuta nada automáticamente**. La decisión es tuya; el hook nunca muta tu repo por su cuenta.
+- Dentro del **worktree de una sesión**, te recuerda tu rol (sesión, rama, áreas) y que el guard de carril está activo.
+- En la **raíz compartida** de un repo rw, te dice cuántas sesiones activas hay y qué herramientas (`rw_status`, `rw_check`, `rw_roles`) puedes usar.
+
+El hook **falla en abierto**: pase lo que pase (payload vacío o inválido, error de git) siempre sale con código 0 para no romper jamás el arranque de una sesión.
+
+### Huecos documentados a nivel usuario
+
+- **El hook de carril de OpenCode sigue pendiente de verificación**, igual que a nivel proyecto: su guard pre-escritura (`tool.execute.before`) solo existe vía un plugin TypeScript, no una entrada JSON fusionable. A nivel usuario `rw adapters --user` escribe el **servidor MCP** de OpenCode pero **no** su hook de carril, para no inventar una config equivocada.
+- Los **skills y comandos** (`.claude`/`.opencode`) NO se instalan a nivel usuario: son contenido derivado de la config del proyecto (por ejemplo la tabla de sesiones activas), así que siguen viviendo por repo vía `rw adapters` (sin `--user`).
 
 ## Aplicación de carriles (hook)
 
