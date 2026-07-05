@@ -1,5 +1,9 @@
-import type { AgentKind, Claim, Session } from '../contract/schema.js';
+import type { AgentKind, AgentsConfig, Claim, Session } from '../contract/schema.js';
+import { assertNever } from '../core/assert.js';
+import { bootstrapRepo } from '../engine/bootstrap.js';
+import type { RunbookResult } from '../engine/configure.js';
 import type { CommandRunner } from '../engine/exec.js';
+import { createGit, type GitError } from '../engine/git.js';
 import {
   claimRole,
   generateClaimToken,
@@ -52,6 +56,20 @@ const fail = (kind: string, message: string): ToolFailure => ({ ok: false, error
 // Engine errors already expose {kind, message}; flatten them uniformly.
 const failFrom = (error: { readonly kind: string; readonly message: string }): ToolFailure =>
   fail(error.kind, error.message);
+
+// A GitError has no uniform `message` field (non-zero-exit carries an output
+// instead), so render one before flattening it into the tool envelope.
+const describeGitError = (error: GitError): string => {
+  switch (error.kind) {
+    case 'spawn-failed':
+    case 'parse-failed':
+      return error.message;
+    case 'non-zero-exit':
+      return `git salió con código ${error.output.exitCode}: ${error.output.stderr.trim()}`;
+    default:
+      return assertNever(error);
+  }
+};
 
 const summarizeSession = (session: Session): SessionSummary => ({
   id: session.id,
@@ -303,4 +321,58 @@ export const handleLaneCheck = (
     allowed: fileClass !== 'invasion',
     session: ctx.currentSession.id,
   };
+};
+
+export type BootstrapArgs = {
+  readonly sessions?: number;
+  readonly remote?: string;
+  readonly baseBranch?: string;
+};
+
+export type BootstrapResultShape = {
+  readonly gitInitialized: boolean;
+  readonly remoteAdded?: string;
+  readonly alreadyConfigured: boolean;
+  readonly committed: boolean;
+  readonly config?: AgentsConfig;
+  readonly runbook?: RunbookResult;
+};
+
+// Unlike every other tool, bootstrap runs BEFORE the repo is configured, so it
+// takes the raw server cwd instead of a resolved McpContext (the config and
+// worktrees may not exist yet). The engine owns the already-configured and
+// inside-worktree guards.
+export const handleBootstrap = async (
+  cwd: string,
+  args: BootstrapArgs,
+  deps: ToolDeps,
+): Promise<ToolResult<BootstrapResultShape>> => {
+  const result = await bootstrapRepo({
+    cwd,
+    now: deps.now,
+    ...(args.sessions !== undefined ? { sessions: args.sessions } : {}),
+    ...(args.baseBranch !== undefined ? { baseBranch: args.baseBranch } : {}),
+    ...(args.remote !== undefined ? { remote: { url: args.remote } } : {}),
+    ...(deps.run !== undefined ? { run: deps.run } : {}),
+    ...(deps.runRaw !== undefined ? { runRaw: deps.runRaw } : {}),
+  });
+  return result.ok ? { ok: true, ...result.value } : failFrom(result.error);
+};
+
+export type AddRemoteArgs = { readonly url: string; readonly name?: string };
+
+export type AddRemoteResult = { readonly name: string; readonly url: string };
+
+// Attaches a remote to the SHARED root's git binding (not the worktree cwd), so an
+// agent inside a session can point the whole repo at its origin. addRemote is a
+// soft no-op when the remote already exists.
+export const handleAddRemote = async (
+  ctx: McpContext,
+  args: AddRemoteArgs,
+  deps: ToolDeps,
+): Promise<ToolResult<AddRemoteResult>> => {
+  const name = args.name ?? 'origin';
+  const git = createGit(ctx.sharedRoot, deps.run, deps.runRaw);
+  const added = await git.addRemote(name, args.url);
+  return added.ok ? { ok: true, name, url: args.url } : fail(added.error.kind, describeGitError(added.error));
 };

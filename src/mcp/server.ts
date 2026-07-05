@@ -8,6 +8,8 @@ import { readVersion } from '../cli/version.js';
 import type { CommandRunner } from '../engine/exec.js';
 import { resolveMcpContext, type McpContext } from './context.js';
 import {
+  handleAddRemote,
+  handleBootstrap,
   handleCheck,
   handleClaim,
   handleFinish,
@@ -172,6 +174,38 @@ export const createRwMcpServer = (deps: RwMcpServerDeps = {}): McpServer => {
       inputSchema: { path: z.string() },
     },
     (args) => runTool((ctx) => handleLaneCheck(ctx, args)),
+  );
+
+  server.registerTool(
+    'rw_bootstrap',
+    {
+      title: 'Inicializar y configurar el repo',
+      description:
+        'Prepara el repo desde una sesión: hace git init si hace falta, genera agents.config.json y provisiona ramas, worktrees, bases de datos y el tablero. Acepta "sessions", "remote" y "baseBranch".',
+      inputSchema: {
+        sessions: z.number().int().positive().optional(),
+        remote: z.string().optional(),
+        baseBranch: z.string().optional(),
+      },
+    },
+    // Bootstrap CANNOT go through runTool: it runs before the repo is configured,
+    // so resolveMcpContext would fail. It takes the raw server cwd; the engine
+    // owns the inside-worktree and already-configured guards.
+    async (args) => {
+      const result = await handleBootstrap(cwd(), args, toolDeps());
+      return jsonResult(result, !result.ok);
+    },
+  );
+
+  server.registerTool(
+    'rw_add_remote',
+    {
+      title: 'Agregar un remote',
+      description:
+        'Agrega un remote git (por defecto "origin") en la raíz compartida del repo. Acepta "url" (obligatorio) y "name".',
+      inputSchema: { url: z.string(), name: z.string().optional() },
+    },
+    (args) => runTool((ctx, toolDep) => handleAddRemote(ctx, args, toolDep)),
   );
 
   return server;

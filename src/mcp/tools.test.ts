@@ -4,9 +4,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AgentsConfig } from '../contract/schema.js';
 import { unwrap } from '../core/result.test-support.js';
 import { buildConfig, runGitOrThrow } from '../engine/git.test-support.js';
+import { runCommand } from '../engine/exec.js';
 import { resolveMcpContext, type McpContext } from './context.js';
 import { setupMcpRepo, type McpRepo } from './mcp.test-support.js';
 import {
+  handleAddRemote,
+  handleBootstrap,
   handleCheck,
   handleClaim,
   handleFinish,
@@ -241,5 +244,53 @@ describe('handleFinish', () => {
       throw new Error('expected failure');
     }
     expect(result.error.kind).toBe('no-session');
+  });
+});
+
+describe('handleAddRemote', () => {
+  let mcp: McpRepo;
+
+  beforeEach(async () => {
+    mcp = await setupMcpRepo(buildConfig({ integrationBranch: 'develop' }));
+  });
+
+  afterEach(async () => {
+    await mcp.repo.cleanup();
+  });
+
+  it('attaches a remote to the shared root even when called from a session worktree', async () => {
+    const ctx = unwrap(await resolveMcpContext(mcp.worktreePath('s1')));
+    const result = data(await handleAddRemote(ctx, { url: 'https://example.test/repo.git' }, { now: NOW }));
+    expect(result).toEqual({ name: 'origin', url: 'https://example.test/repo.git' });
+
+    // The remote landed on the SHARED root, not the worktree.
+    const url = unwrap(
+      await runCommand('git', ['remote', 'get-url', 'origin'], { cwd: mcp.repo.root }),
+    );
+    expect(url.stdout.trim()).toBe('https://example.test/repo.git');
+  });
+});
+
+describe('handleBootstrap', () => {
+  let mcp: McpRepo;
+
+  afterEach(async () => {
+    await mcp.repo.cleanup();
+  });
+
+  it('reports alreadyConfigured when the integration branch already exists', async () => {
+    mcp = await setupMcpRepo(buildConfig({ integrationBranch: 'develop' }));
+    const result = data(await handleBootstrap(mcp.repo.root, {}, { now: NOW }));
+    expect(result).toMatchObject({ alreadyConfigured: true, gitInitialized: false, committed: false });
+  });
+
+  it('refuses with inside-worktree when the cwd is a session worktree', async () => {
+    mcp = await setupMcpRepo(buildConfig({ integrationBranch: 'develop' }));
+    const result = await handleBootstrap(mcp.worktreePath('s1'), {}, { now: NOW });
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error('expected failure');
+    }
+    expect(result.error.kind).toBe('inside-worktree');
   });
 });

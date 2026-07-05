@@ -55,10 +55,12 @@ describe('rw MCP server (round trip)', () => {
     await mcp.repo.cleanup();
   });
 
-  it('exposes the eight rw tools', async () => {
+  it('exposes the ten rw tools', async () => {
     const { client } = await connect(mcp);
     const { tools } = await client.listTools();
     expect(tools.map((tool) => tool.name).sort()).toEqual([
+      'rw_add_remote',
+      'rw_bootstrap',
       'rw_check',
       'rw_claim',
       'rw_finish',
@@ -68,6 +70,25 @@ describe('rw MCP server (round trip)', () => {
       'rw_status',
       'rw_whoami',
     ]);
+  });
+
+  it('rw_add_remote attaches a remote to the shared root', async () => {
+    const { call } = await connect(mcp);
+    const { isError, payload } = await call('rw_add_remote', {
+      url: 'https://example.test/repo.git',
+    });
+    expect(isError).toBe(false);
+    expect(payload).toMatchObject({ ok: true, name: 'origin', url: 'https://example.test/repo.git' });
+  });
+
+  it('rw_bootstrap refuses from inside a session worktree', async () => {
+    // The server cwd is pinned to the s1 worktree, so bootstrap must detect it is
+    // inside a session and refuse rather than re-init anything.
+    const { call } = await connect(mcp);
+    const { isError, payload } = await call('rw_bootstrap');
+    expect(isError).toBe(true);
+    expect(payload.ok).toBe(false);
+    expect((payload.error as { kind: string }).kind).toBe('inside-worktree');
   });
 
   it('rw_status resolves the shared root and the current session', async () => {
