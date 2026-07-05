@@ -145,6 +145,12 @@ export type Git = {
   readonly mergeAbort: () => Promise<Result<void, GitError>>;
   readonly deleteBranch: (name: string) => Promise<Result<void, GitError>>;
   readonly statusPorcelain: () => Promise<Result<string, GitError>>;
+  // Bootstrap primitives. initRepo runs in the bound repoRoot even when it is not
+  // yet a repo (`git init` creates the metadata there); addRemote is a soft no-op
+  // when the remote already exists; isGitRepo answers true/false without throwing.
+  readonly initRepo: (defaultBranch: string) => Promise<Result<void, GitError>>;
+  readonly addRemote: (name: string, url: string) => Promise<Result<void, GitError>>;
+  readonly isGitRepo: () => Promise<boolean>;
 };
 
 export const createGit = (
@@ -308,6 +314,41 @@ export const createGit = (
     return result.ok ? ok(trimmedStdout(result.value)) : result;
   };
 
+  const initRepo: Git['initRepo'] = async (defaultBranch) => {
+    // -b names the initial branch up front, so the base branch is deterministic
+    // even before the first commit is born. Runs in repoRoot, which may not yet
+    // be a repository — `git init` creates the .git metadata there.
+    const result = await inRepo(['init', '-b', defaultBranch]);
+    return result.ok ? ok(undefined) : result;
+  };
+
+  const addRemote: Git['addRemote'] = async (name, url) => {
+    // `git remote add` exits non-zero when the remote already exists, but for
+    // bootstrap that is a soft success, not a failure — so check first and skip.
+    const listed = await inRepo(['remote']);
+    if (!listed.ok) {
+      return listed;
+    }
+    const existing = new Set(
+      listed.value.stdout
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0),
+    );
+    if (existing.has(name)) {
+      return ok(undefined);
+    }
+    const added = await inRepo(['remote', 'add', name, url]);
+    return added.ok ? ok(undefined) : added;
+  };
+
+  const isGitRepo: Git['isGitRepo'] = async () => {
+    // runRaw, not run: outside a repo git exits 128 with a fatal message, which is
+    // data ("not a repo"), not a spawn failure. Only a clean exit 0 means yes.
+    const result = await runRaw('git', ['rev-parse', '--is-inside-work-tree'], { cwd: repoRoot });
+    return result.ok && result.value.exitCode === 0;
+  };
+
   return {
     version,
     toplevel,
@@ -324,5 +365,8 @@ export const createGit = (
     mergeAbort,
     deleteBranch,
     statusPorcelain,
+    initRepo,
+    addRemote,
+    isGitRepo,
   };
 };

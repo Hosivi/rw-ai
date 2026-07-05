@@ -1,8 +1,9 @@
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { unwrap, unwrapErr } from '../core/result.test-support.js';
-import { runCommand } from './exec.js';
+import { runCommand, runCommandRaw, type CommandRunner } from './exec.js';
 import {
   createGit,
   MIN_GIT_VERSION,
@@ -12,7 +13,7 @@ import {
   parseWorktreeList,
   supportsMergeTree,
 } from './git.js';
-import { createTempRepo, runGitOrThrow, type TempRepo } from './git.test-support.js';
+import { createTempRepo, removeDirRobust, runGitOrThrow, type TempRepo } from './git.test-support.js';
 
 describe('parseGitVersion', () => {
   it('parses a plain version', () => {
@@ -431,5 +432,76 @@ describe('createGit branch and merge operations (integration)', () => {
     if (!merged.ok) {
       expect(merged.error.kind).toBe('non-zero-exit');
     }
+  });
+});
+
+describe('bootstrap git primitives (integration)', () => {
+  describe('addRemote / isGitRepo on an existing repo', () => {
+    let repo: TempRepo;
+
+    beforeEach(async () => {
+      repo = await createTempRepo();
+    });
+
+    afterEach(async () => {
+      await repo.cleanup();
+    });
+
+    it('isGitRepo is true inside a real repository', async () => {
+      expect(await createGit(repo.root).isGitRepo()).toBe(true);
+    });
+
+    it('addRemote attaches a named remote', async () => {
+      const git = createGit(repo.root);
+      unwrap(await git.addRemote('origin', 'https://example.test/repo.git'));
+      const url = unwrap(await runCommand('git', ['remote', 'get-url', 'origin'], { cwd: repo.root }));
+      expect(url.stdout.trim()).toBe('https://example.test/repo.git');
+    });
+
+    it('addRemote is a soft no-op when the remote already exists (url unchanged)', async () => {
+      const git = createGit(repo.root);
+      unwrap(await git.addRemote('origin', 'https://example.test/first.git'));
+      // A second add for the same name must not fail nor overwrite the first url.
+      unwrap(await git.addRemote('origin', 'https://example.test/second.git'));
+      const url = unwrap(await runCommand('git', ['remote', 'get-url', 'origin'], { cwd: repo.root }));
+      expect(url.stdout.trim()).toBe('https://example.test/first.git');
+    });
+  });
+
+  describe('initRepo / isGitRepo on a fresh directory', () => {
+    let dir: string;
+
+    beforeEach(async () => {
+      // A bare mkdtemp dir with NO git — the exact state `rw bootstrap` faces.
+      dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'rw-ai-init-')));
+    });
+
+    afterEach(async () => {
+      await removeDirRobust(dir);
+    });
+
+    it('isGitRepo is false before init and true after', async () => {
+      // GIT_CEILING_DIRECTORIES stops git's upward repo discovery at the temp
+      // dir's parent, so an ancestor repo (e.g. a dotfiles repo at $HOME, which
+      // contains the OS temp dir on some machines) can't make a bare dir look
+      // like a repo. Without it this assertion is environment-dependent.
+      const ceiling = path.dirname(dir);
+      const withCeiling =
+        (base: CommandRunner): CommandRunner =>
+        (command, args, opts) =>
+          base(command, args, { ...opts, env: { ...opts.env, GIT_CEILING_DIRECTORIES: ceiling } });
+      const git = createGit(dir, withCeiling(runCommand), withCeiling(runCommandRaw));
+      expect(await git.isGitRepo()).toBe(false);
+      unwrap(await git.initRepo('main'));
+      expect(await git.isGitRepo()).toBe(true);
+    });
+
+    it('initRepo sets the requested initial branch name', async () => {
+      const git = createGit(dir);
+      unwrap(await git.initRepo('trunk'));
+      // `git branch --show-current` reports the unborn branch name after init -b.
+      const branch = unwrap(await runCommand('git', ['branch', '--show-current'], { cwd: dir }));
+      expect(branch.stdout.trim()).toBe('trunk');
+    });
   });
 });
