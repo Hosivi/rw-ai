@@ -441,36 +441,55 @@ const mergeMcpJson = (base: JsonObject): JsonObject => {
   return { ...base, mcpServers: { ...servers, 'rw-ai': { command: 'rw', args: ['mcp'] } } };
 };
 
-// The single stdin-driven guard command rw installs into a PreToolUse hook; also
-// the dedupe key so re-running never appends a duplicate group.
+// The two stdin-driven commands rw installs as Claude Code hooks. Each command
+// string is ALSO its dedupe key, so re-running never appends a duplicate group.
 const LANE_GUARD_COMMAND = 'rw lane-guard';
+const SESSION_START_COMMAND = 'rw session-start';
 
-// True when a PreToolUse matcher-group already runs the lane guard (checked by the
-// exact command string, per the dedupe contract).
-const groupRunsLaneGuard = (group: unknown): boolean => {
+// True when a matcher-group already runs `command` (checked by the exact command
+// string, per the dedupe contract). Event-agnostic: shared by every hook merge.
+const groupRunsCommand = (group: unknown, command: string): boolean => {
   if (!isPlainObject(group) || !Array.isArray(group.hooks)) {
     return false;
   }
   return group.hooks.some(
-    (hook) =>
-      isPlainObject(hook) && hook.type === 'command' && hook.command === LANE_GUARD_COMMAND,
+    (hook) => isPlainObject(hook) && hook.type === 'command' && hook.command === command,
   );
 };
 
-// Claude Code runs PreToolUse hooks before Write/Edit/MultiEdit; rw adds a group
-// that shells out to the lane guard so a write outside the session's lane is blocked.
+// Append rw's group to an existing hook-event array only when no group already runs
+// the command, so re-runs are no-ops. Every existing group and key is preserved.
+const ensureHookGroup = (
+  existing: unknown,
+  command: string,
+  group: JsonObject,
+): readonly JsonObject[] => {
+  const groups = Array.isArray(existing) ? (existing as JsonObject[]) : [];
+  return groups.some((candidate) => groupRunsCommand(candidate, command))
+    ? groups
+    : [...groups, group];
+};
+
+// Claude Code runs PreToolUse hooks before Write/Edit/MultiEdit (rw blocks
+// out-of-lane writes) and SessionStart hooks when a session opens (rw surfaces its
+// availability and offers bootstrap). Both are merged non-destructively and deduped
+// by the exact command string, so re-running rw adapters never duplicates a group.
 const mergeSettingsJson = (base: JsonObject): JsonObject => {
   const hooks = isPlainObject(base.hooks) ? base.hooks : {};
-  const preToolUse = Array.isArray(hooks.PreToolUse) ? hooks.PreToolUse : [];
-  // Idempotent + non-destructive: only append rw's group when no existing group
-  // already runs the guard; every other event, matcher-group and key is untouched.
-  const nextPreToolUse = preToolUse.some(groupRunsLaneGuard)
-    ? preToolUse
-    : [
-        ...preToolUse,
-        { matcher: 'Write|Edit|MultiEdit', hooks: [{ type: 'command', command: LANE_GUARD_COMMAND }] },
-      ];
-  return { ...base, hooks: { ...hooks, PreToolUse: nextPreToolUse } };
+  const nextPreToolUse = ensureHookGroup(hooks.PreToolUse, LANE_GUARD_COMMAND, {
+    matcher: 'Write|Edit|MultiEdit',
+    hooks: [{ type: 'command', command: LANE_GUARD_COMMAND }],
+  });
+  // SessionStart takes an OPTIONAL source matcher (startup|resume|clear|compact);
+  // omitting it fires on EVERY session-open source, which is what we want — rw
+  // should surface on startup, resume and clear alike.
+  const nextSessionStart = ensureHookGroup(hooks.SessionStart, SESSION_START_COMMAND, {
+    hooks: [{ type: 'command', command: SESSION_START_COMMAND }],
+  });
+  return {
+    ...base,
+    hooks: { ...hooks, PreToolUse: nextPreToolUse, SessionStart: nextSessionStart },
+  };
 };
 
 // OpenCode's local-MCP shape is confirmed from its docs: an `mcp.<name>` entry with
@@ -520,11 +539,59 @@ const installAgentConfigs = async (root: string): Promise<Result<AdapterWrite[],
   return ok([...claude.value, opencode.value]);
 };
 
+// The user-scope install: rw's MCP server + hooks written under `homeDir` so EVERY
+// Claude Code / OpenCode session on the machine sees rw, with no per-project setup.
+// It is config-independent (the wiring is static: `rw mcp` / `rw lane-guard` /
+// `rw session-start`), so it needs no repo. Every file is MERGED non-destructively —
+// ~/.claude.json in particular holds the user's projects and history, which must
+// survive untouched.
+//
+// Locations confirmed against the Claude Code / OpenCode docs, and deliberately
+// DIFFERENT from the project scope:
+//   - Claude Code MCP servers → ~/.claude.json under `mcpServers` (where
+//     `claude mcp add --scope user` stores them), NOT settings.json.
+//   - Claude Code hooks       → ~/.claude/settings.json (apply to every project).
+//   - OpenCode MCP servers    → ~/.config/opencode/opencode.json under `mcp`.
+export const installUserAdapters = async (
+  homeDir: string,
+): Promise<Result<AdaptersInstallResult, AdaptersError>> => {
+  const written: AdapterWrite[] = [];
+  const claudeMcp = await mergeJsonConfig(path.join(homeDir, '.claude.json'), mergeMcpJson);
+  if (!claudeMcp.ok) {
+    return claudeMcp;
+  }
+  written.push(claudeMcp.value);
+  const claudeSettings = await mergeJsonConfig(
+    path.join(homeDir, '.claude', 'settings.json'),
+    mergeSettingsJson,
+  );
+  if (!claudeSettings.ok) {
+    return claudeSettings;
+  }
+  written.push(claudeSettings.value);
+  const opencode = await mergeJsonConfig(
+    path.join(homeDir, '.config', 'opencode', 'opencode.json'),
+    mergeOpencodeJson,
+  );
+  if (!opencode.ok) {
+    return opencode;
+  }
+  written.push(opencode.value);
+  return ok({ written });
+};
+
 export type InstallAdaptersOptions = {
   // When true, the two Claude Code config files (.mcp.json + .claude/settings.json)
   // are ALSO written into each active session worktree, so an agent started inside
   // a worktree is wired there too. Default: only the shared project root.
   readonly worktrees?: boolean;
+  // When true, install rw's MCP server + hooks at the USER scope under `homeDir`
+  // instead of the project, so EVERY Claude Code / OpenCode session on the machine
+  // sees rw with no per-project setup. projectRoot/config are ignored — the wiring
+  // is config-independent — so `homeDir` MUST be provided. Delegates to
+  // installUserAdapters; see it for the exact user-scoped file locations.
+  readonly user?: boolean;
+  readonly homeDir?: string;
 };
 
 // Writes the cross-agent adapters into a target repo, idempotently. Unlike the
@@ -537,6 +604,15 @@ export const installAdapters = async (
   config: AgentsConfig,
   options: InstallAdaptersOptions = {},
 ): Promise<Result<AdaptersInstallResult, AdaptersError>> => {
+  // User scope short-circuits: only the machine-wide config files under homeDir are
+  // written; projectRoot/config are unused (the wiring is config-independent), so a
+  // global install needs no repo. Guard homeDir because it is optional on the type.
+  if (options.user === true) {
+    return options.homeDir === undefined
+      ? err({ kind: 'io', message: 'la instalación a nivel usuario requiere homeDir' })
+      : installUserAdapters(options.homeDir);
+  }
+
   const written: AdapterWrite[] = [];
   for (const { relPath, content } of planWrites(config)) {
     const filePath = path.join(projectRoot, relPath);

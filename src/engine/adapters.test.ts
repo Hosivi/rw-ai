@@ -5,7 +5,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AgentsConfig } from '../contract/schema.js';
 import { unwrap } from '../core/result.test-support.js';
-import { installAdapters, renderSkill, SKILLS } from './adapters.js';
+import { installAdapters, installUserAdapters, renderSkill, SKILLS } from './adapters.js';
 import { buildConfig, removeDirRobust } from './git.test-support.js';
 
 const SKILL_SLUGS = ['rw-workflow', 'rw-identity', 'rw-integration', 'rw-test-artifacts'] as const;
@@ -161,6 +161,36 @@ describe('installAdapters — agent config wiring (MCP + hook)', () => {
     expect(settingsWrite?.action).toBe('unchanged');
   });
 
+  it('registers a SessionStart hook running rw session-start, idempotent + non-destructive over PreToolUse', async () => {
+    const config = buildConfig();
+    unwrap(await installAdapters(dir, config));
+
+    const settings = await readJson(path.join('.claude', 'settings.json'));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sessionStart = settings.hooks.SessionStart.flatMap((group: any) => group.hooks).find(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (hook: any) => hook.command === 'rw session-start',
+    );
+    expect(sessionStart).toEqual({ type: 'command', command: 'rw session-start' });
+    // The PreToolUse lane guard still coexists in the same settings file.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const laneGuard = settings.hooks.PreToolUse.flatMap((group: any) => group.hooks).find(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (hook: any) => hook.command === 'rw lane-guard',
+    );
+    expect(laneGuard).toBeDefined();
+
+    // Re-running appends no second SessionStart group.
+    unwrap(await installAdapters(dir, config));
+    const settings2 = await readJson(path.join('.claude', 'settings.json'));
+    const sessionStartCount = settings2.hooks.SessionStart.flatMap(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (group: any) => group.hooks,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ).filter((hook: any) => hook.command === 'rw session-start').length;
+    expect(sessionStartCount).toBe(1);
+  });
+
   it('writes opencode.json with the rw-ai MCP server (type local, command array)', async () => {
     unwrap(await installAdapters(dir, buildConfig()));
     const opencode = await readJson('opencode.json');
@@ -236,5 +266,105 @@ describe('installAdapters — agent config wiring (MCP + hook)', () => {
       expect(existsSync(path.join(dir, session.worktree, '.mcp.json'))).toBe(true);
       expect(existsSync(path.join(dir, session.worktree, '.claude', 'settings.json'))).toBe(true);
     }
+  });
+});
+
+describe('installUserAdapters (user scope)', () => {
+  let home: string;
+
+  beforeEach(async () => {
+    // A fake home dir stands in for os.homedir(): the user-scoped writes must land
+    // HERE, never in the developer's real ~/.claude.json.
+    home = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'rw-ai-userhome-')));
+  });
+
+  afterEach(() => removeDirRobust(home));
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const readHomeJson = async (...rel: string[]): Promise<any> =>
+    JSON.parse(await fs.readFile(path.join(home, ...rel), 'utf8'));
+
+  it('writes the MCP server to ~/.claude.json, hooks to ~/.claude/settings.json, and OpenCode global config', async () => {
+    const result = unwrap(await installUserAdapters(home));
+    expect(result.written.length).toBe(3);
+    expect(result.written.every((write) => write.action === 'created')).toBe(true);
+
+    // Claude Code user-scoped MCP server → ~/.claude.json (NOT settings.json).
+    const claudeJson = await readHomeJson('.claude.json');
+    expect(claudeJson.mcpServers['rw-ai']).toEqual({ command: 'rw', args: ['mcp'] });
+
+    // Claude Code user-scoped hooks → ~/.claude/settings.json (both hooks).
+    const settings = await readHomeJson('.claude', 'settings.json');
+    const commands = settings.hooks.PreToolUse.flatMap(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (group: any) => group.hooks,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ).map((hook: any) => hook.command);
+    expect(commands).toContain('rw lane-guard');
+    const startCommands = settings.hooks.SessionStart.flatMap(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (group: any) => group.hooks,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ).map((hook: any) => hook.command);
+    expect(startCommands).toContain('rw session-start');
+
+    // OpenCode global config → ~/.config/opencode/opencode.json.
+    const opencode = await readHomeJson('.config', 'opencode', 'opencode.json');
+    expect(opencode.mcp['rw-ai']).toEqual({ type: 'local', command: ['rw', 'mcp'], enabled: true });
+  });
+
+  it('is idempotent: a second run rewrites nothing', async () => {
+    unwrap(await installUserAdapters(home));
+    const second = unwrap(await installUserAdapters(home));
+    expect(second.written.every((write) => write.action === 'unchanged')).toBe(true);
+  });
+
+  it('merges non-destructively over a pre-existing ~/.claude.json (projects/servers/keys preserved)', async () => {
+    // ~/.claude.json holds the user's real projects + history + other MCP servers.
+    await fs.writeFile(
+      path.join(home, '.claude.json'),
+      `${JSON.stringify(
+        {
+          projects: { '/some/repo': { allowedTools: [] } },
+          mcpServers: { other: { command: 'other-bin', args: [] } },
+          numStartups: 7,
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+    // A settings.json with an unrelated key + a different PreToolUse hook.
+    await fs.mkdir(path.join(home, '.claude'), { recursive: true });
+    await fs.writeFile(
+      path.join(home, '.claude', 'settings.json'),
+      `${JSON.stringify(
+        {
+          theme: 'dark',
+          hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'other-guard' }] }] },
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+
+    unwrap(await installUserAdapters(home));
+
+    const claudeJson = await readHomeJson('.claude.json');
+    expect(claudeJson.projects['/some/repo']).toEqual({ allowedTools: [] }); // preserved
+    expect(claudeJson.numStartups).toBe(7); // preserved
+    expect(claudeJson.mcpServers.other).toEqual({ command: 'other-bin', args: [] }); // preserved
+    expect(claudeJson.mcpServers['rw-ai']).toEqual({ command: 'rw', args: ['mcp'] }); // added
+
+    const settings = await readHomeJson('.claude', 'settings.json');
+    expect(settings.theme).toBe('dark'); // preserved
+    const commands = settings.hooks.PreToolUse.flatMap(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (group: any) => group.hooks,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ).map((hook: any) => hook.command);
+    expect(commands).toContain('other-guard'); // preserved
+    expect(commands).toContain('rw lane-guard'); // added
   });
 });

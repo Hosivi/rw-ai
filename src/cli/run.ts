@@ -46,6 +46,7 @@ const OPTIONS = {
   online: { type: 'boolean' },
   claim: { type: 'boolean' },
   worktrees: { type: 'boolean' },
+  user: { type: 'boolean' },
   force: { type: 'boolean' },
   version: { type: 'boolean', short: 'v' },
   help: { type: 'boolean', short: 'h' },
@@ -64,7 +65,7 @@ const USAGE: readonly string[] = [
   '  scaffold [--sessions <n>] [--stacks <a,b>] [--db <docker|local|supabase|none>] [--base-branch <rama>] [--force]',
   '                                 Detecta el stack y genera agents.config.json',
   '  configure                      Provisiona ramas, worktrees, bases de datos y el tablero',
-  '  adapters [--worktrees]         Escribe la config del agente (MCP + hook), adaptadores (.claude/.opencode) y skills de rw',
+  '  adapters [--worktrees] [--user]   Escribe la config del agente (MCP + hooks) y skills de rw; --user instala a nivel usuario para toda sesión de la máquina',
   '  roles                          Lista los roles y su estado (libre/ocupado)',
   '  init [--role <id>] [--agent <tipo>] [--ttl <horas>]',
   '                                 Elige y reclama un rol (interactivo si no pasas --role)',
@@ -261,7 +262,10 @@ const route = async (argv: readonly string[], deps: CliDeps): Promise<CommandRes
     case 'configure':
       return runConfigure(deps);
     case 'adapters':
-      return runAdapters({ worktrees: values.worktrees === true }, deps);
+      return runAdapters(
+        { worktrees: values.worktrees === true, user: values.user === true },
+        deps,
+      );
     case 'roles':
       return runRoles(deps);
     case 'init':
