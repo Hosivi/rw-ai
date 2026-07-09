@@ -67,6 +67,9 @@ const boardDirectories = (config: AgentsConfig, boardDir: string): string[] => {
   const dirs: string[] = [];
   for (const session of activeSessions(config)) {
     dirs.push(path.join(boardDir, 'screenshots', session.id));
+    // The read model's per-session status marker lives here (status.json), written
+    // by lifecycle hooks and consumed by `rw status`.
+    dirs.push(path.join(boardDir, 'sessions', session.id));
     for (const platformId of PLATFORM_IDS) {
       dirs.push(path.join(boardDir, 'test-artifacts', session.id, platformId));
     }
