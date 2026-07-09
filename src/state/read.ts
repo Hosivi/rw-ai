@@ -52,7 +52,10 @@ export const collectSessionStates = async (
   const gitSignals = new Map<string, GitSignal>();
   for (const session of activeSessions(deps.config)) {
     const marker = await readSessionMarker(deps.boardDir, session.id);
-    // A corrupt marker is a per-session signal loss, not a global failure.
+    // Best-effort: BOTH a corrupt marker (invalid-marker) and a real read failure
+    // (io) degrade to null so one bad session never fails the whole status read.
+    // Trade-off: a persistent IO fault on the board dir looks like "no marker yet";
+    // surfacing that distinctly is a Phase-2 (daemon/observability) concern.
     markers.set(session.id, marker.ok ? marker.value : null);
     const worktreePath = path.join(deps.projectRoot, session.worktree);
     gitSignals.set(

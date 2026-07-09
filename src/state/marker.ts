@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
+import { sessionIdSchema } from '../contract/schema.js';
 import { err, ok, type Result } from '../core/result.js';
 import { writeFileAtomic } from '../engine/fs-atomic.js';
 
@@ -17,7 +18,11 @@ export type MarkerTests = z.infer<typeof markerTestsSchema>;
 
 export const sessionMarkerSchema = z.object({
   version: z.literal(1),
-  sessionId: z.string().min(1),
+  // Reuse the strict session-id contract (^s[1-9][0-9]*$) rather than a free
+  // string: sessionId flows into sessionMarkerPath -> fs.mkdir/write, so a lax
+  // value (`..`, `/`, absolute-like) would be a path-traversal sink the moment a
+  // less-trusted caller (Phase-2 daemon / an MCP tool) supplies it.
+  sessionId: sessionIdSchema,
   phase: markerPhaseSchema,
   tests: markerTestsSchema.optional(),
   detail: z.string().optional(),

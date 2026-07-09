@@ -62,6 +62,7 @@ describe('formatStatusTable', () => {
     expect(lines[1]).toContain('s1');
     expect(lines[1]).toContain('amarillo');
     expect(lines[1]).toContain('+2');
+    expect(lines[1]).toContain('-1');
     expect(lines[1]).toContain('working');
   });
 
