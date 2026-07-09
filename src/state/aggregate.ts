@@ -37,6 +37,14 @@ const claimHeld = (claim: RoleStatus): boolean =>
 //   3. green  — everything else: idle/free and nothing in progress.
 // Note: git dirt/ahead only lifts to yellow when the claim is actually held;
 // unowned or expired-claim dirt stays green (no live owner to attribute it to).
+// `git.behind` is intentionally NOT a coloring input — being behind base is
+// staleness, not in-progress work; the count is surfaced in the table for
+// context but never drives the light.
+// KNOWN LIMITATION (Phase 1): the marker phase is written by session-start
+// ('working') but no hook resets it to 'idle' yet, so a session opened once
+// reports yellow until a later phase adds lifecycle reset transitions. Per the
+// approved plan, marker working/review is deliberately NOT gated by claim state
+// (only git signals are); revisit when lifecycle writes marker transitions.
 export const deriveLight = (
   claim: RoleStatus,
   marker: SessionMarker | null,

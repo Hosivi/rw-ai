@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDefaultConfig } from '../contract/defaults.js';
-import { ok } from '../core/result.js';
+import { err, ok } from '../core/result.js';
 import { unwrap } from '../core/result.test-support.js';
 import type { CommandRunner } from '../engine/exec.js';
 import { removeDirRobust } from '../engine/git.test-support.js';
@@ -83,6 +83,25 @@ describe('collectSessionStates', () => {
     );
 
     expect(states[0]?.marker).toBeNull();
+  });
+
+  it('degrades an unprovisioned worktree (git spawn failure) to clean git, not a global failure', async () => {
+    const gitFails = async () => err({ kind: 'spawn-failed' as const, message: 'ENOENT: no such worktree' });
+
+    const states = unwrap(
+      await collectSessionStates({
+        config,
+        projectRoot: '/repo',
+        boardDir: board,
+        now: NOW,
+        run: gitFails,
+        runRaw: gitFails,
+      }),
+    );
+
+    expect(states).toHaveLength(2);
+    expect(states[0]?.git).toEqual({ dirty: false, ahead: 0, behind: 0 });
+    expect(states.every((s) => s.light === 'green')).toBe(true);
   });
 
   it('returns an empty array when there are no active sessions', async () => {

@@ -52,6 +52,16 @@ describe('deriveLight (truth table: claim × marker × git)', () => {
     expect(deriveLight(freeClaim, null, { dirty: true, ahead: 2, behind: 0 })).toBe('green');
     expect(deriveLight(expiredClaim, null, { dirty: true, ahead: 2, behind: 0 })).toBe('green');
   });
+
+  it('does NOT color on behind alone (staleness is informational, not in-progress)', () => {
+    expect(deriveLight(heldClaim, null, { dirty: false, ahead: 0, behind: 500 })).toBe('green');
+  });
+
+  it('keeps a working marker yellow even under an expired claim (Phase 1: no reset path)', () => {
+    // Locks the documented known limitation: marker phase is not claim-gated, and
+    // nothing resets a stale 'working' marker yet.
+    expect(deriveLight(expiredClaim, marker({ phase: 'working' }), cleanGit)).toBe('yellow');
+  });
 });
 
 describe('computeSessionState', () => {

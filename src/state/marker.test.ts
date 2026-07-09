@@ -63,6 +63,11 @@ describe('parseSessionMarker', () => {
     const error = unwrapErr(parseSessionMarker({ ...validMarker, updatedAt: 'yesterday' }));
     expect(error.issues.some((i) => i.includes('updatedAt'))).toBe(true);
   });
+
+  it('rejects a path-traversal sessionId (strict session-id contract)', () => {
+    const error = unwrapErr(parseSessionMarker({ ...validMarker, sessionId: '../../evil' }));
+    expect(error.issues.some((i) => i.includes('sessionId'))).toBe(true);
+  });
 });
 
 describe('sessionMarkerPath', () => {
