@@ -207,6 +207,27 @@ describe('startDaemon', () => {
     await expect(connectFrameClient(daemon.address)).rejects.toBeTruthy();
   });
 
+  it('closes a connection that sends an invalid request', async () => {
+    const { daemon } = await start();
+    const client = await connectFrameClient(daemon.address);
+    let closed = false;
+    client.onClose(() => {
+      closed = true;
+    });
+    client.send({ type: 'mutate' }); // not a valid read/notify verb
+    await vi.waitFor(() => expect(closed).toBe(true));
+  });
+
+  it('drops a muted connection after the handshake timeout', async () => {
+    // Long enough to observe the connected state before the guard fires.
+    const { daemon } = await start({ handshakeMs: 200 });
+    const client = await connectFrameClient(daemon.address);
+    await vi.waitFor(() => expect(daemon.clientCount()).toBe(1));
+    // Client never sends a request → the handshake guard closes it.
+    await vi.waitFor(() => expect(daemon.clientCount()).toBe(0));
+    client.close();
+  });
+
   it('cancels the idle timer while a client is connected and re-arms on disconnect', async () => {
     const { daemon, timers } = await start();
     const client = await connectFrameClient(daemon.address);

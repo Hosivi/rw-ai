@@ -55,7 +55,13 @@ export const watchRepoSignals = (deps: WatchDeps, onChange: () => void): (() => 
 
   const tryWatch = (target: string, options?: { recursive?: boolean }): void => {
     try {
-      watchers.push(fs.watch(target, options ?? {}, () => debounced()));
+      const watcher = fs.watch(target, options ?? {}, () => debounced());
+      // An FSWatcher is an EventEmitter: a later 'error' (dir deleted/recreated by
+      // `rw configure`, a git checkout, or a delete+rename save) with no listener
+      // would THROW and crash the shared daemon. Swallow it and lean on the poll —
+      // same guard as the socket 'error' handler in transport.ts.
+      watcher.on('error', () => undefined);
+      watchers.push(watcher);
     } catch {
       // Target not present yet; the poll covers us until it exists.
     }
@@ -64,7 +70,11 @@ export const watchRepoSignals = (deps: WatchDeps, onChange: () => void): (() => 
   tryWatch(claimsFilePath(deps.boardDir));
   tryWatch(path.join(deps.boardDir, 'sessions'), { recursive: true });
 
+  // unref: the poll alone must never keep the process alive (e.g. if startup fails
+  // after the watcher started but before listen). The daemon's server keeps the
+  // loop alive while it is actually serving.
   const poll = setInterval(() => debounced(), deps.pollMs);
+  poll.unref();
 
   return () => {
     debounced.cancel();

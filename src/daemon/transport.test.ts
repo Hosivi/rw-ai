@@ -66,4 +66,11 @@ describe('frame transport (net pipe/socket)', () => {
   it('rejects connecting when no server is listening', async () => {
     await expect(connectFrameClient(freshAddress())).rejects.toBeTruthy();
   });
+
+  it('rejects a second listen on a live address (single-instance)', async () => {
+    const address = freshAddress();
+    const first = await listenFrameServer(address, () => undefined);
+    servers.push(first);
+    await expect(listenFrameServer(address, () => undefined)).rejects.toBeTruthy();
+  });
 });

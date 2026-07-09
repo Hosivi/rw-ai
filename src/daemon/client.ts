@@ -26,7 +26,13 @@ export const readSnapshotViaDaemon = async (
     };
     const timer = setTimeout(() => finish(null), timeoutMs);
     conn.onMessage((message) => {
-      const states = (message as { states?: unknown }).states;
+      // Defensive: the reply could be null or a non-object (version skew, some
+      // other process on the address). `.states` on null throws — guard first so
+      // ANY malformed reply falls back to null rather than crashing rw status.
+      const states =
+        typeof message === 'object' && message !== null
+          ? (message as { states?: unknown }).states
+          : undefined;
       finish(Array.isArray(states) ? (states as PublicSessionState[]) : null);
     });
     conn.onClose(() => finish(null));

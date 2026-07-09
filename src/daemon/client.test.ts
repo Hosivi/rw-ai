@@ -4,6 +4,7 @@ import type { SessionState } from '../state/aggregate.js';
 import { daemonAddress } from './address.js';
 import { readSnapshotViaDaemon } from './client.js';
 import { startDaemon, type Daemon } from './server.js';
+import { listenFrameServer, type FrameServer } from './transport.js';
 
 let seq = 0;
 const freshAddress = (): string =>
@@ -20,9 +21,12 @@ const state = (light: SessionState['light']): SessionState => ({
 });
 
 let daemons: Daemon[] = [];
+let servers: FrameServer[] = [];
 afterEach(async () => {
   await Promise.all(daemons.map((d) => d.close()));
+  await Promise.all(servers.map((s) => s.close()));
   daemons = [];
+  servers = [];
 });
 
 describe('readSnapshotViaDaemon', () => {
@@ -43,5 +47,14 @@ describe('readSnapshotViaDaemon', () => {
 
   it('returns null when no daemon is listening', async () => {
     expect(await readSnapshotViaDaemon(freshAddress(), 300)).toBeNull();
+  });
+
+  it('returns null (not a throw) when the reply is a non-object', async () => {
+    const address = freshAddress();
+    const server = await listenFrameServer(address, (conn) => {
+      conn.onMessage(() => conn.send(null)); // malformed: null.states would throw
+    });
+    servers.push(server);
+    expect(await readSnapshotViaDaemon(address, 500)).toBeNull();
   });
 });
