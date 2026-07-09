@@ -6,6 +6,15 @@ local M = {}
 
 local LIGHT_ICON = { red = '🔴', yellow = '🟡', green = '🟢' }
 
+-- vim.json.decode maps JSON null to vim.NIL (a sentinel), NOT Lua nil — and
+-- vim.NIL is truthy, so `x or default` would keep it. Normalize both to a default.
+local function coalesce(value, default)
+  if value == nil or value == vim.NIL then
+    return default
+  end
+  return value
+end
+
 local function claim_label(claim)
   claim = claim or {}
   if claim.status == 'free' then
@@ -49,11 +58,11 @@ function M.render(states)
     lines[#lines + 1] = string.format(
       '%s  %-8s  %-8s  %-14s  %-10s  %s',
       icon,
-      s.sessionId or '?',
+      coalesce(s.sessionId, '?'),
       claim_label(s.claim),
       git_label(s.git),
-      s.phase or '-',
-      s.branch or ''
+      coalesce(s.phase, '-'),
+      coalesce(s.branch, '')
     )
   end
   return lines

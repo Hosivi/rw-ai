@@ -57,6 +57,14 @@ check('render shows claim held', body:find('held') ~= nil)
 check('render shows git ahead+dirty', body:find('%+2') ~= nil and body:find('dirty') ~= nil)
 check('render shows phase', body:find('blocked') ~= nil)
 
+-- status render: a JSON null phase decodes to vim.NIL; it must render as '-',
+-- never the literal "vim.NIL" (regression for the e2e-found bug).
+local decoded = vim.json.decode(
+  '[{"sessionId":"s9","branch":"b","light":"green","claim":{"status":"free","expired":false},"phase":null,"tests":null,"git":{"dirty":false,"ahead":0,"behind":0}}]'
+)
+local null_body = table.concat(status.render(decoded), '\n')
+check('render null phase as dash (vim.NIL handled)', null_body:find('vim.NIL') == nil and null_body:find('s9') ~= nil)
+
 if ok_all then
   print('ALL PASS')
 else
