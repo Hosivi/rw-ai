@@ -10,13 +10,24 @@ import { loadContext } from '../context.js';
 // (the returned promise resolves only on idle self-shutdown), so a launcher runs
 // it detached. Single-instance: if one already serves this repo, exit 0 without
 // starting a second.
-export const runDaemon = async (deps: CliDeps): Promise<CommandResult> => {
+//
+// `rw daemon --address`: print the daemon's pipe/socket address for this repo and
+// exit, WITHOUT starting it. The Neovim plugin uses this so it never has to
+// re-derive the sha256 address in Lua (one source of truth).
+export const runDaemon = async (
+  args: { readonly printAddress: boolean },
+  deps: CliDeps,
+): Promise<CommandResult> => {
   const context = await loadContext(deps.cwd, deps.run, deps.runRaw);
   if (!context.ok) {
     return contextErrorResult(context.error);
   }
   const { projectRoot, config } = context.value;
   const address = daemonAddress(projectRoot, deps.platform);
+
+  if (args.printAddress) {
+    return { lines: [address], exitCode: 0 };
+  }
 
   const existing = await readSnapshotViaDaemon(address, 500);
   if (existing !== null) {

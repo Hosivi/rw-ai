@@ -247,6 +247,13 @@ describe('runCli', () => {
     expect(code).toBe(1);
     expect(lines.join('\n')).not.toContain('Comando desconocido');
   });
+
+  it('accepts daemon --address (routed, exit 1 outside a repo)', async () => {
+    const { lines, deps } = capture({ cwd: '/anywhere', run: gitNotARepo, runRaw: gitNotARepo });
+    const code = await runCli(['daemon', '--address'], deps);
+    expect(code).toBe(1);
+    expect(lines.join('\n')).not.toContain('Uso: rw'); // --address is a known flag, not a usage error
+  });
 });
 
 describe('parseAreas', () => {
