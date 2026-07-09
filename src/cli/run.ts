@@ -12,6 +12,7 @@ import { runAdapters } from './commands/adapters.js';
 import { runBootstrap } from './commands/bootstrap.js';
 import { runCheck } from './commands/check.js';
 import { runSessions } from './commands/claude-sessions.js';
+import { runDaemon } from './commands/daemon.js';
 import { runConfigure } from './commands/configure.js';
 import { runClaim, runInit, runRoles, runRelease, runWhoami } from './commands/identity.js';
 import { runLane } from './commands/lane.js';
@@ -69,6 +70,7 @@ const USAGE: readonly string[] = [
   '  configure                      Provisiona ramas, worktrees, bases de datos y el tablero',
   '  adapters [--worktrees] [--user]   Escribe la config del agente (MCP + hooks) y skills de rw; --user instala a nivel usuario para toda sesión de la máquina',
   '  status [--json]                Muestra el estado de cada sesión (claim, git, fase, semáforo)',
+  '  daemon                         Corre el observador por-repo (lo usan rw status y el plugin de Neovim); se apaga solo al quedar inactivo',
   '  roles                          Lista los roles y su estado (libre/ocupado)',
   '  init [--role <id>] [--agent <tipo>] [--ttl <horas>]',
   '                                 Elige y reclama un rol (interactivo si no pasas --role)',
@@ -271,6 +273,8 @@ const route = async (argv: readonly string[], deps: CliDeps): Promise<CommandRes
       );
     case 'status':
       return runStatus({ json: values.json === true }, deps);
+    case 'daemon':
+      return runDaemon(deps);
     case 'roles':
       return runRoles(deps);
     case 'init':

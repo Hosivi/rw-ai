@@ -234,6 +234,19 @@ describe('runCli', () => {
     const code = await runCli(['status', '--json'], deps);
     expect(code).toBe(1);
   });
+
+  it('lists daemon in --help', async () => {
+    const { lines, deps } = capture();
+    await runCli(['--help'], deps);
+    expect(lines.join('\n')).toContain('daemon');
+  });
+
+  it('routes daemon to its handler (context error exit 1 outside a repo)', async () => {
+    const { lines, deps } = capture({ cwd: '/anywhere', run: gitNotARepo, runRaw: gitNotARepo });
+    const code = await runCli(['daemon'], deps);
+    expect(code).toBe(1);
+    expect(lines.join('\n')).not.toContain('Comando desconocido');
+  });
 });
 
 describe('parseAreas', () => {
