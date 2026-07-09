@@ -119,6 +119,8 @@ export const parseMergeTreeConflicts = (stdout: string): string[] => {
   return files;
 };
 
+export type AheadBehind = { readonly ahead: number; readonly behind: number };
+
 export type Git = {
   readonly version: () => Promise<Result<GitVersion, GitError>>;
   readonly toplevel: () => Promise<Result<string, GitError>>;
@@ -132,6 +134,11 @@ export type Git = {
   ) => Promise<Result<MergeTreeResult, GitError>>;
   readonly createBranch: (name: string, from: string) => Promise<Result<void, GitError>>;
   readonly currentBranch: () => Promise<Result<string, GitError>>;
+  // Read model: how far THIS working tree's HEAD has diverged from a base ref.
+  // Bind via createGit(worktreePath, ...) to ask per-session. "Can't tell"
+  // (unknown base, unrelated history, detached with no merge-base) → {0,0}, not
+  // an error, so a misconfigured session never breaks the whole status view.
+  readonly aheadBehind: (base: string) => Promise<Result<AheadBehind, GitError>>;
   readonly listWorktrees: () => Promise<Result<WorktreeInfo[], GitError>>;
   readonly addWorktree: (worktreePath: string, branch: string) => Promise<Result<void, GitError>>;
   // The following move THIS working tree's HEAD, so lifecycle only calls them on
@@ -248,6 +255,28 @@ export const createGit = (
     return result.ok ? ok(trimmedStdout(result.value)) : result;
   };
 
+  const aheadBehind: Git['aheadBehind'] = async (base) => {
+    // runRaw, not run: an unknown base ref / unrelated history exits non-zero,
+    // but for a read model that is "can't tell" → safe {0,0}, not a hard failure.
+    // Only a spawn-level failure (result not ok) is a real error to propagate.
+    const result = await runRaw('git', ['rev-list', '--left-right', '--count', `${base}...HEAD`], {
+      cwd: repoRoot,
+    });
+    if (!result.ok) {
+      return result;
+    }
+    if (result.value.exitCode !== 0) {
+      return ok({ ahead: 0, behind: 0 });
+    }
+    // `--left-right --count base...HEAD` prints "<left>\t<right>": left = commits
+    // in base not HEAD (behind), right = commits in HEAD not base (ahead).
+    const match = result.value.stdout.trim().match(/^(\d+)\s+(\d+)$/);
+    if (match === null) {
+      return ok({ ahead: 0, behind: 0 });
+    }
+    return ok({ behind: Number(match[1]), ahead: Number(match[2]) });
+  };
+
   const listWorktrees: Git['listWorktrees'] = async () => {
     const result = await inRepo(['worktree', 'list', '--porcelain']);
     return result.ok ? ok(parseWorktreeList(result.value.stdout)) : result;
@@ -357,6 +386,7 @@ export const createGit = (
     mergeTree,
     createBranch,
     currentBranch,
+    aheadBehind,
     listWorktrees,
     addWorktree,
     switchBranch,
