@@ -19,6 +19,7 @@ import { runLaneGuard } from './commands/lane-guard.js';
 import { runFinish } from './commands/lifecycle.js';
 import { runScaffold } from './commands/scaffold.js';
 import { runSessionStart } from './commands/session-start.js';
+import { runStatus } from './commands/status.js';
 import { runAddSession, runArchive } from './commands/sessions.js';
 import { runTokens } from './commands/tokens.js';
 import { printLines } from './output.js';
@@ -44,6 +45,7 @@ const OPTIONS = {
   cwd: { type: 'string' },
   model: { type: 'string' },
   online: { type: 'boolean' },
+  json: { type: 'boolean' },
   claim: { type: 'boolean' },
   worktrees: { type: 'boolean' },
   user: { type: 'boolean' },
@@ -66,6 +68,7 @@ const USAGE: readonly string[] = [
   '                                 Detecta el stack y genera agents.config.json',
   '  configure                      Provisiona ramas, worktrees, bases de datos y el tablero',
   '  adapters [--worktrees] [--user]   Escribe la config del agente (MCP + hooks) y skills de rw; --user instala a nivel usuario para toda sesión de la máquina',
+  '  status [--json]                Muestra el estado de cada sesión (claim, git, fase, semáforo)',
   '  roles                          Lista los roles y su estado (libre/ocupado)',
   '  init [--role <id>] [--agent <tipo>] [--ttl <horas>]',
   '                                 Elige y reclama un rol (interactivo si no pasas --role)',
@@ -266,6 +269,8 @@ const route = async (argv: readonly string[], deps: CliDeps): Promise<CommandRes
         { worktrees: values.worktrees === true, user: values.user === true },
         deps,
       );
+    case 'status':
+      return runStatus({ json: values.json === true }, deps);
     case 'roles':
       return runRoles(deps);
     case 'init':

@@ -215,6 +215,25 @@ describe('runCli', () => {
     expect(text).not.toContain('Comando desconocido');
     expect(text.toLowerCase()).toContain('git');
   });
+
+  it('lists status in --help', async () => {
+    const { lines, deps } = capture();
+    await runCli(['--help'], deps);
+    expect(lines.join('\n')).toContain('status');
+  });
+
+  it('routes status to its handler (context error exit 1 outside a repo)', async () => {
+    const { lines, deps } = capture({ cwd: '/anywhere', run: gitNotARepo, runRaw: gitNotARepo });
+    const code = await runCli(['status'], deps);
+    expect(code).toBe(1);
+    expect(lines.join('\n')).not.toContain('Comando desconocido');
+  });
+
+  it('accepts the --json flag on status (still routed, exit 1 outside a repo)', async () => {
+    const { deps } = capture({ cwd: '/anywhere', run: gitNotARepo, runRaw: gitNotARepo });
+    const code = await runCli(['status', '--json'], deps);
+    expect(code).toBe(1);
+  });
 });
 
 describe('parseAreas', () => {
