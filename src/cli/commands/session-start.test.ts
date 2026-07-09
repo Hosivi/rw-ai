@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { resolveBoardDir } from '../../contract/env.js';
 import { err } from '../../core/result.js';
 import type { CommandRunner } from '../../engine/exec.js';
 import { buildConfig } from '../../engine/git.test-support.js';
 import { setupMcpRepo, type McpRepo } from '../../mcp/mcp.test-support.js';
+import { unwrap } from '../../core/result.test-support.js';
+import { readSessionMarker } from '../../state/marker.js';
 import type { CliDeps } from '../command.js';
 import { runSessionStart } from './session-start.js';
 
@@ -97,6 +100,21 @@ describe('runSessionStart', () => {
       const result = await run({ cwd: mcp.worktreePath('s1'), stdin: '}{ garbage' });
       expect(result.exitCode).toBe(0);
       expect(parseAdditionalContext(result.lines)).toContain('sesión s1');
+    });
+
+    it('writes a working marker for the session it opened in', async () => {
+      await run({ cwd: mcp.worktreePath('s1'), stdin: '' });
+      const boardDir = resolveBoardDir(mcp.repo.root, mcp.config);
+      const marker = unwrap(await readSessionMarker(boardDir, 's1'));
+      expect(marker?.phase).toBe('working');
+      expect(marker?.sessionId).toBe('s1');
+      expect(marker?.updatedAt).toBe(NOW.toISOString());
+    });
+
+    it('does NOT write a marker at the shared root (no current session)', async () => {
+      await run({ cwd: mcp.repo.root, stdin: '' });
+      const boardDir = resolveBoardDir(mcp.repo.root, mcp.config);
+      expect(unwrap(await readSessionMarker(boardDir, 's1'))).toBeNull();
     });
   });
 });

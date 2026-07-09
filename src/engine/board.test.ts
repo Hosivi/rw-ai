@@ -31,6 +31,9 @@ describe('ensureBoard', () => {
     // the shared dirs, and the seeded files.
     expect(existsSync(path.join(boardDir(), 'screenshots', 's1'))).toBe(true);
     expect(existsSync(path.join(boardDir(), 'screenshots', 's2'))).toBe(true);
+    // The read-model marker dirs (status.json lands here).
+    expect(existsSync(path.join(boardDir(), 'sessions', 's1'))).toBe(true);
+    expect(existsSync(path.join(boardDir(), 'sessions', 's2'))).toBe(true);
     for (const platform of ['web', 'mobile', 'native', 'dotnet']) {
       expect(existsSync(path.join(boardDir(), 'test-artifacts', 's1', platform))).toBe(true);
     }

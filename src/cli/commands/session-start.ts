@@ -1,5 +1,6 @@
 import { activeSessions } from '../../engine/sessions.js';
 import { resolveMcpContext } from '../../mcp/context.js';
+import { writeSessionMarker } from '../../state/marker.js';
 import type { CliDeps, CommandResult } from '../command.js';
 
 // `rw session-start`: the Claude Code SessionStart hook. When a session opens,
@@ -49,6 +50,21 @@ export const runSessionStart = async (
 
     const { config, currentSession } = context.value;
     if (currentSession !== undefined) {
+      // Wire the read-model marker: an agent opening inside a session worktree is
+      // the workspace signal `rw status` reports. Best-effort — a marker failure
+      // must NEVER change the hook output or break startup, so it is isolated in
+      // its own try/catch and its Result is deliberately ignored.
+      try {
+        await writeSessionMarker(context.value.boardDir, {
+          version: 1,
+          sessionId: currentSession.id,
+          phase: 'working',
+          updatedAt: deps.now.toISOString(),
+        });
+      } catch {
+        // fail-open: swallow any unexpected throw from the marker write.
+      }
+
       // Inside a session worktree: point the agent at its role and the lane guard.
       const areas = currentSession.areas.join(', ');
       return sessionStartOutput(
