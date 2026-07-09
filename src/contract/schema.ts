@@ -70,23 +70,37 @@ export const portsSchema = z.object({
 });
 export type Ports = z.infer<typeof portsSchema>;
 
-const sessionIdPattern = /^s[1-9][0-9]*$/;
-export const sessionIdSchema = z.string().regex(sessionIdPattern);
+export const SESSION_ID_PATTERN = /^s[1-9][0-9]*$/;
+export const sessionIdSchema = z.string().regex(SESSION_ID_PATTERN);
 
 const isAbsolutePathLike = (value: string): boolean =>
   value.startsWith('/') || value.startsWith('\\') || /^[A-Za-z]:/.test(value);
+
+const hasParentPathSegment = (value: string): boolean => value.split(/[\\/]+/).includes('..');
+
+const relativeProjectPathSchema = (label: string) =>
+  z
+    .string()
+    .min(1)
+    .refine((value) => !isAbsolutePathLike(value), {
+      message: `${label} must be a relative path`,
+    })
+    .refine((value) => !hasParentPathSegment(value), {
+      message: `${label} must not contain parent directory traversal`,
+    });
+
+const boardDirSchema = relativeProjectPathSchema('board.dir');
+
+const worktreePathSchema = relativeProjectPathSchema('worktree');
+
+const worktreesDirSchema = relativeProjectPathSchema('git.worktreesDir');
 
 export const sessionSchema = z.object({
   id: sessionIdSchema,
   branch: z.string().min(1),
   // Relative to the repo root: consumers join it themselves, so an absolute
-  // path here would silently escape the project.
-  worktree: z
-    .string()
-    .min(1)
-    .refine((value) => !isAbsolutePathLike(value), {
-      message: 'worktree must be a relative path',
-    }),
+  // path or parent traversal here would silently escape the project.
+  worktree: worktreePathSchema,
   status: z.enum(['active', 'archived']),
   areas: z.array(z.string().min(1)).min(1),
   ports: portsSchema.optional(),
@@ -123,7 +137,7 @@ export type DbConfigInput = z.input<typeof dbSchema>;
 export const gitConfigSchema = z.object({
   baseBranch: z.string().min(1).default('main'),
   integrationBranch: z.string().min(1).default('develop'),
-  worktreesDir: z.string().min(1).default('.worktrees'),
+  worktreesDir: worktreesDirSchema.default('.worktrees'),
 });
 export type GitConfig = z.infer<typeof gitConfigSchema>;
 
@@ -164,7 +178,7 @@ export const agentsConfigSchema = z
       worktreesDir: '.worktrees',
     }),
     board: z
-      .object({ dir: z.string().min(1).default('.review-board') })
+      .object({ dir: boardDirSchema.default('.review-board') })
       .default({ dir: '.review-board' }),
     db: dbSchema.default({ strategy: 'none', host: 'localhost', port: 5432 }),
     sharedZones: z.array(z.string().min(1)).default([]),
@@ -224,8 +238,23 @@ export type AgentsConfig = z.infer<typeof agentsConfigSchema>;
 export const roleIdSchema = z.union([sessionIdSchema, z.literal('integrator')]);
 export type RoleId = z.infer<typeof roleIdSchema>;
 
-export const agentKindSchema = z.enum(['claude-code', 'opencode', 'human']);
-export type AgentKind = z.infer<typeof agentKindSchema>;
+export const agentIdentitySchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, {
+  message: 'agent must be a non-empty id using letters, numbers, dot, underscore, or hyphen',
+});
+export type AgentIdentity = z.infer<typeof agentIdentitySchema>;
+
+/**
+ * @deprecated Compatibility alias for existing contract consumers. This is no
+ * longer a closed, enum-shaped Zod schema; do not depend on enum helpers or a
+ * finite value set. Use agentIdentitySchema for new code.
+ */
+export const agentKindSchema = agentIdentitySchema;
+/**
+ * @deprecated Compatibility alias for existing contract consumers. This is a
+ * string identity type, not a finite agent-kind union. Use AgentIdentity for new
+ * code.
+ */
+export type AgentKind = AgentIdentity;
 
 // Long enough that concurrent agents cannot trivially collide or guess each
 // other's token; claims are cooperative locking, not a security boundary.
@@ -240,7 +269,7 @@ export const claimSchema = z.discriminatedUnion('status', [
     token: z.string().min(MIN_CLAIM_TOKEN_LENGTH),
     claimedAt: z.iso.datetime(),
     expiresAt: z.iso.datetime(),
-    agent: agentKindSchema.optional(),
+    agent: agentIdentitySchema.optional(),
   }),
 ]);
 export type Claim = z.infer<typeof claimSchema>;

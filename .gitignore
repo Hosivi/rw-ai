@@ -1,6 +1,11 @@
 node_modules/
 dist/
 coverage/
+.codegraph/
+.rw-ai.bootstrap.lock
+.review-board/claims.json
+.review-board/.claims.json.*.tmp
+.review-board/runtime-manifests/
 
 # gentle-ai skill-registry cache (machine-local absolute paths)
 .atl/

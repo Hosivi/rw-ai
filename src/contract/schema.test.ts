@@ -124,6 +124,27 @@ describe('agentsConfigSchema', () => {
     raw.sessions[0]!.id = badId;
     expect(parseAgentsConfig(raw).ok).toBe(false);
   });
+
+  it('rejects parent traversal in session worktree paths', () => {
+    const raw = nodeConfig();
+    raw.sessions[0]!.worktree = '../outside';
+    const error = unwrapErr(parseAgentsConfig(raw));
+    expect(error.issues.join('\n')).toContain('worktree must not contain parent directory traversal');
+  });
+
+  it('rejects parent traversal in git.worktreesDir', () => {
+    const raw = { ...nodeConfig(), git: { worktreesDir: '../outside' } };
+    const error = unwrapErr(parseAgentsConfig(raw));
+    expect(error.issues.join('\n')).toContain(
+      'git.worktreesDir must not contain parent directory traversal',
+    );
+  });
+
+  it('accepts normal relative worktree paths', () => {
+    const raw = { ...nodeConfig(), git: { worktreesDir: '.worktrees' } };
+    raw.sessions[0]!.worktree = '.worktrees/s1';
+    expect(parseAgentsConfig(raw).ok).toBe(true);
+  });
 });
 
 describe('claimsFileSchema', () => {
@@ -147,6 +168,64 @@ describe('claimsFileSchema', () => {
     expect(claims.claims['s2']?.status).toBe('claimed');
     expect(claims.claims['integrator']?.status).toBe('free');
   });
+
+  it('accepts a custom agent identity', () => {
+    const claims = unwrap(
+      parseClaimsFile({
+        version: 1,
+        claims: {
+          s1: {
+            status: 'claimed',
+            token: 'abcdef1234',
+            claimedAt: '2026-07-02T10:00:00Z',
+            expiresAt: '2026-07-02T11:00:00Z',
+            agent: 'cursor-agent',
+          },
+        },
+      }),
+    );
+    expect(claims.claims['s1']).toMatchObject({ agent: 'cursor-agent' });
+  });
+
+  it.each(['claude-code', 'opencode', 'human'])(
+    'keeps compatibility with previous agent value %j',
+    (agent) => {
+      const claims = unwrap(
+        parseClaimsFile({
+          version: 1,
+          claims: {
+            s1: {
+              status: 'claimed',
+              token: 'abcdef1234',
+              claimedAt: '2026-07-02T10:00:00Z',
+              expiresAt: '2026-07-02T11:00:00Z',
+              agent,
+            },
+          },
+        }),
+      );
+      expect(claims.claims['s1']).toMatchObject({ agent });
+    },
+  );
+
+  it.each(['', '   ', 'agent with spaces', 'agent/slash'])(
+    'rejects invalid agent identity %j',
+    (agent) => {
+      const result = parseClaimsFile({
+        version: 1,
+        claims: {
+          s1: {
+            status: 'claimed',
+            token: 'abcdef1234',
+            claimedAt: '2026-07-02T10:00:00Z',
+            expiresAt: '2026-07-02T11:00:00Z',
+            agent,
+          },
+        },
+      });
+      expect(result.ok).toBe(false);
+    },
+  );
 
   it('rejects a claimed entry without a token', () => {
     const result = parseClaimsFile({

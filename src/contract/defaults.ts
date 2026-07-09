@@ -11,6 +11,7 @@ import {
   type Session,
   type Stack,
   type TestsConfig,
+  sessionIdSchema,
 } from './schema.js';
 
 export const PORT_BANDS = {
@@ -102,6 +103,59 @@ export const createSession = (params: CreateSessionParams): Result<Session, Cont
     session = { ...session, db: { name: sessionDbName(projectName, index) } };
   }
   return ok(session);
+};
+
+const sessionIndexFromId = (session: Pick<Session, 'id'>): Result<number, ContractError> => {
+  const parsed = sessionIdSchema.safeParse(session.id);
+  if (!parsed.success) {
+    return err(contractError(`session id must match s<N>, got ${session.id}`));
+  }
+  return ok(Number(session.id.slice(1)));
+};
+
+export const nextSessionIndex = (
+  sessions: ReadonlyArray<Pick<Session, 'id'>>,
+): Result<number, ContractError> => {
+  let max = 0;
+  for (const session of sessions) {
+    const index = sessionIndexFromId(session);
+    if (isErr(index)) {
+      return index;
+    }
+    max = Math.max(max, index.value);
+  }
+  return ok(max + 1);
+};
+
+export type AppendNextSessionParams = {
+  config: AgentsConfig;
+  branch?: string;
+  areas?: string[];
+  platforms?: Session['platforms'];
+};
+
+export const appendNextSession = (
+  params: AppendNextSessionParams,
+): Result<AgentsConfig, ContractError> => {
+  const { config } = params;
+  const nextIndex = nextSessionIndex(config.sessions);
+  if (isErr(nextIndex)) {
+    return nextIndex;
+  }
+  const session = createSession({
+    index: nextIndex.value,
+    projectName: config.project.name,
+    branch: params.branch,
+    areas: params.areas,
+    platforms: params.platforms,
+    withDb: config.db.strategy !== 'none',
+    withPorts: config.project.stacks.includes('node'),
+    worktreesDir: config.git.worktreesDir,
+  });
+  if (isErr(session)) {
+    return session;
+  }
+  return parseAgentsConfig({ ...config, sessions: [...config.sessions, session.value] });
 };
 
 export type CreateDefaultConfigParams = {

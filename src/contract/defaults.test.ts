@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { unwrap } from '../core/result.test-support.js';
 import {
+  appendNextSession,
   createDefaultConfig,
   createEmptyClaims,
   createSession,
   defaultSessionBranch,
   isClaimExpired,
+  nextSessionIndex,
   PORT_BANDS,
   sessionDbName,
   sessionPorts,
@@ -122,6 +124,80 @@ describe('createDefaultConfig', () => {
     expect(
       createDefaultConfig({ projectName: 'Demo', stacks: ['node'], sessionCount: 0 }).ok,
     ).toBe(false);
+  });
+});
+
+describe('nextSessionIndex', () => {
+  it('starts at 1 when no sessions exist', () => {
+    expect(unwrap(nextSessionIndex([]))).toBe(1);
+  });
+
+  it('uses the next number after the highest existing session id', () => {
+    expect(unwrap(nextSessionIndex([{ id: 's1' }, { id: 's3' }]))).toBe(4);
+  });
+
+  it('rejects an invalid existing session id', () => {
+    expect(nextSessionIndex([{ id: 'worker-1' }]).ok).toBe(false);
+  });
+});
+
+describe('appendNextSession', () => {
+  it('appends the next schema-valid node session without filesystem side effects', () => {
+    const config = unwrap(
+      createDefaultConfig({
+        projectName: 'Demo',
+        stacks: ['node'],
+        sessionCount: 2,
+        db: { strategy: 'docker', service: 'db' },
+        worktreesDir: '.rw/worktrees',
+      }),
+    );
+    const nextConfig = unwrap(appendNextSession({ config, areas: ['packages/api/**'] }));
+    expect(nextConfig.sessions).toHaveLength(3);
+    expect(nextConfig.sessions[2]).toMatchObject({
+      id: 's3',
+      branch: 'feat/s3-inicial',
+      worktree: '.rw/worktrees/s3',
+      areas: ['packages/api/**'],
+      ports: { api: 3002, web: 3102, metro: 8083 },
+      db: { name: 'demo_s3' },
+    });
+  });
+
+  it('preserves a caller-provided branch for the new session', () => {
+    const config = unwrap(
+      createDefaultConfig({ projectName: 'Ledger', stacks: ['dotnet'], sessionCount: 1 }),
+    );
+    const nextConfig = unwrap(appendNextSession({ config, branch: 'feat/custom-session' }));
+    expect(nextConfig.sessions[1]).toMatchObject({
+      id: 's2',
+      branch: 'feat/custom-session',
+    });
+  });
+
+  it('propagates invalid existing session ids when choosing the next id', () => {
+    const config = unwrap(
+      createDefaultConfig({ projectName: 'Ledger', stacks: ['dotnet'], sessionCount: 1 }),
+    );
+    const result = appendNextSession({
+      config: { ...config, sessions: [{ ...config.sessions[0]!, id: 'worker-1' }] },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain('session id must match s<N>');
+    }
+  });
+
+  it('fails deterministically when a node config would append s100 past the port-band cap', () => {
+    const config = unwrap(
+      createDefaultConfig({ projectName: 'Demo', stacks: ['node'], sessionCount: 99 }),
+    );
+    const result = appendNextSession({ config });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain('session index 100 exceeds 99');
+      expect(result.error.message).toContain(String(PORT_BANDS.web));
+    }
   });
 });
 
