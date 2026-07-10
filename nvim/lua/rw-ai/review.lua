@@ -33,7 +33,7 @@ local function build_lines(info)
   add('Branch: ' .. info.branch .. '  vs  ' .. info.integrationBranch)
   add('Worktree: ' .. info.worktree)
   add('')
-  add('Changed files (' .. #info.changedFiles .. ')   [<CR> open  a approve  r reject  c comment  q close]')
+  add('Changed files (' .. #info.changedFiles .. ')   [<CR> open  d diagram  a approve  r reject  c comment  q close]')
   if #info.changedFiles == 0 then
     add('  (none)')
   else
@@ -128,9 +128,27 @@ local function decide(verdict, comment)
   refresh()
 end
 
+-- Blast-radius diagram (WU-4.3): ASCII via `rw blast`, in a scratch split. The
+-- image.nvim path (Kitty/WezTerm/sixel) can render the same data richer later.
+local function show_diagram()
+  if not state.info then
+    return
+  end
+  local _, out = cli.run({ 'blast', state.info.sessionId })
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].buftype = 'nofile'
+  vim.bo[buf].bufhidden = 'wipe'
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(vim.trim(out), '\n', { plain = true }))
+  vim.bo[buf].modifiable = false
+  pcall(vim.api.nvim_buf_set_name, buf, 'rw-ai://blast')
+  vim.cmd('botright split')
+  vim.api.nvim_win_set_buf(0, buf)
+end
+
 local function set_keymaps(buf)
   local opts = { buffer = buf, silent = true, nowait = true }
   vim.keymap.set('n', '<CR>', open_file_under_cursor, opts)
+  vim.keymap.set('n', 'd', show_diagram, opts)
   vim.keymap.set('n', 'a', function()
     decide('approved')
   end, opts)
