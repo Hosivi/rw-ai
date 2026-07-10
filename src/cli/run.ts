@@ -18,6 +18,7 @@ import { runClaim, runInit, runRoles, runRelease, runWhoami } from './commands/i
 import { runLane } from './commands/lane.js';
 import { runLaneGuard } from './commands/lane-guard.js';
 import { runFinish } from './commands/lifecycle.js';
+import { runDecide, runReviewInfo } from './commands/review.js';
 import { runScaffold } from './commands/scaffold.js';
 import { runSessionStart } from './commands/session-start.js';
 import { runStatus } from './commands/status.js';
@@ -48,6 +49,9 @@ const OPTIONS = {
   online: { type: 'boolean' },
   json: { type: 'boolean' },
   address: { type: 'boolean' },
+  approve: { type: 'boolean' },
+  reject: { type: 'boolean' },
+  comment: { type: 'string' },
   claim: { type: 'boolean' },
   worktrees: { type: 'boolean' },
   user: { type: 'boolean' },
@@ -72,6 +76,9 @@ const USAGE: readonly string[] = [
   '  adapters [--worktrees] [--user]   Escribe la config del agente (MCP + hooks) y skills de rw; --user instala a nivel usuario para toda sesión de la máquina',
   '  status [--json]                Muestra el estado de cada sesión (claim, git, fase, semáforo)',
   '  daemon [--address]             Corre el observador por-repo (se apaga solo al quedar inactivo); --address solo imprime su dirección y sale',
+  '  review-info <sesión> [--json]  Muestra la rama, worktree y archivos cambiados de una sesión vs la rama de integración',
+  '  decide <sesión> --approve|--reject [--comment <texto>]',
+  '                                 Registra una decisión de revisión y libera el rol integrator',
   '  roles                          Lista los roles y su estado (libre/ocupado)',
   '  init [--role <id>] [--agent <tipo>] [--ttl <horas>]',
   '                                 Elige y reclama un rol (interactivo si no pasas --role)',
@@ -276,6 +283,15 @@ const route = async (argv: readonly string[], deps: CliDeps): Promise<CommandRes
       return runStatus({ json: values.json === true }, deps);
     case 'daemon':
       return runDaemon({ printAddress: values.address === true }, deps);
+    case 'review-info':
+      return runReviewInfo({ session: positionals[1], json: values.json === true }, deps);
+    case 'decide': {
+      if (values.approve === true && values.reject === true) {
+        return usageError('No puedes pasar --approve y --reject a la vez.');
+      }
+      const verdict = values.approve === true ? 'approved' : values.reject === true ? 'rejected' : undefined;
+      return runDecide({ session: positionals[1], verdict, comment: values.comment }, deps);
+    }
     case 'roles':
       return runRoles(deps);
     case 'init':
