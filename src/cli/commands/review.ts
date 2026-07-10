@@ -2,6 +2,9 @@ import path from 'node:path';
 import { resolveBoardDir } from '../../contract/env.js';
 import { forceFreeRole } from '../../engine/identity.js';
 import { normalizeRepoPath } from '../../engine/git.js';
+import { blastRadius } from '../../codegraph/blast-radius.js';
+import { renderAsciiDiagram } from '../../codegraph/diagram.js';
+import { queryCodeGraph } from '../../codegraph/read.js';
 import { readDecisions, writeDecision, type DecisionVerdict } from '../../state/decisions.js';
 import type { CliDeps, CommandResult } from '../command.js';
 import { contextErrorResult } from '../command.js';
@@ -58,6 +61,42 @@ export const runReviewInfo = async (
     ],
     exitCode: 0,
   };
+};
+
+// `rw blast <session>`: the diff's blast radius (WU-4). Changed files → symbols →
+// callers via CodeGraph, rendered as ASCII. Degrades to a changed-files-only view
+// when there is no CodeGraph index — never fails on its absence.
+export const runBlast = async (
+  args: { readonly session: string | undefined },
+  deps: CliDeps,
+): Promise<CommandResult> => {
+  if (args.session === undefined || args.session.trim() === '') {
+    return { lines: ['Falta la sesión. Uso: rw blast <sesión>'], exitCode: 2 };
+  }
+  const context = await loadContext(deps.cwd, deps.run, deps.runRaw);
+  if (!context.ok) {
+    return contextErrorResult(context.error);
+  }
+  const { projectRoot, config, git } = context.value;
+  const session = config.sessions.find((s) => s.id === args.session);
+  if (session === undefined) {
+    return { lines: [`Sesión desconocida: ${args.session}`], exitCode: 1 };
+  }
+  const changed = await git.changedFiles(config.git.integrationBranch, session.branch);
+  if (!changed.ok) {
+    return { lines: [`No se pudo calcular el diff: ${changed.error.kind}`], exitCode: 1 };
+  }
+  const changedFiles = changed.value;
+
+  const cg = await queryCodeGraph(projectRoot, changedFiles, { runRaw: deps.runRaw });
+  const diagram = cg.available
+    ? renderAsciiDiagram({
+        sessionId: session.id,
+        changedFiles,
+        blast: blastRadius(changedFiles, cg.graph, { depth: 3 }),
+      })
+    : renderAsciiDiagram({ sessionId: session.id, changedFiles, unavailableReason: cg.reason });
+  return { lines: diagram, exitCode: 0 };
 };
 
 // `rw decide <session> --approve|--reject [--comment "..."]`: record a review

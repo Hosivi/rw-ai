@@ -18,7 +18,7 @@ import { runClaim, runInit, runRoles, runRelease, runWhoami } from './commands/i
 import { runLane } from './commands/lane.js';
 import { runLaneGuard } from './commands/lane-guard.js';
 import { runFinish } from './commands/lifecycle.js';
-import { runDecide, runReviewInfo } from './commands/review.js';
+import { runBlast, runDecide, runReviewInfo } from './commands/review.js';
 import { runScaffold } from './commands/scaffold.js';
 import { runSessionStart } from './commands/session-start.js';
 import { runStatus } from './commands/status.js';
@@ -77,6 +77,7 @@ const USAGE: readonly string[] = [
   '  status [--json]                Muestra el estado de cada sesión (claim, git, fase, semáforo)',
   '  daemon [--address]             Corre el observador por-repo (se apaga solo al quedar inactivo); --address solo imprime su dirección y sale',
   '  review-info <sesión> [--json]  Muestra la rama, worktree y archivos cambiados de una sesión vs la rama de integración',
+  '  blast <sesión>                 Diagrama de radio de impacto del diff (archivos → símbolos → llamadores) vía CodeGraph; ASCII si no hay índice',
   '  decide <sesión> --approve|--reject [--comment <texto>]',
   '                                 Registra una decisión de revisión y libera el rol integrator',
   '  roles                          Lista los roles y su estado (libre/ocupado)',
@@ -285,6 +286,8 @@ const route = async (argv: readonly string[], deps: CliDeps): Promise<CommandRes
       return runDaemon({ printAddress: values.address === true }, deps);
     case 'review-info':
       return runReviewInfo({ session: positionals[1], json: values.json === true }, deps);
+    case 'blast':
+      return runBlast({ session: positionals[1] }, deps);
     case 'decide': {
       if (values.approve === true && values.reject === true) {
         return usageError('No puedes pasar --approve y --reject a la vez.');

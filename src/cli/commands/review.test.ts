@@ -5,7 +5,7 @@ import { buildConfig } from '../../engine/git.test-support.js';
 import { setupMcpRepo, type McpRepo } from '../../mcp/mcp.test-support.js';
 import { readDecisions } from '../../state/decisions.js';
 import type { CliDeps } from '../command.js';
-import { runDecide, runReviewInfo } from './review.js';
+import { runBlast, runDecide, runReviewInfo } from './review.js';
 
 const NOW = new Date('2026-07-09T12:00:00.000Z');
 
@@ -63,6 +63,15 @@ describe('review commands', () => {
     it('rejects an unknown session', async () => {
       const result = await runReviewInfo({ session: 's9', json: false }, deps());
       expect(result.exitCode).toBe(1);
+    });
+  });
+
+  describe('runBlast', () => {
+    it('requires a session', async () => {
+      expect((await runBlast({ session: undefined }, deps())).exitCode).toBe(2);
+    });
+    it('rejects an unknown session', async () => {
+      expect((await runBlast({ session: 's9' }, deps())).exitCode).toBe(1);
     });
   });
 });
