@@ -1,37 +1,26 @@
 -- rw-ai.nvim — the cockpit as a Neovim plugin (Phase 3).
--- WU-3.1 (RPC client) + WU-3.2 (:RwStatus dashboard). Review/evidence/decisions
--- (3.3–3.5) build on this connection.
+-- :RwStatus (WU-3.1/3.2) live session dashboard; :RwReview (WU-3.3/3.4/3.5) the
+-- review table with editable diffs, evidence, and decisions.
 
+local cli = require('rw-ai.cli')
 local rpc = require('rw-ai.rpc')
 local status = require('rw-ai.status')
+local review = require('rw-ai.review')
 
 local M = {}
 
--- rw_cmd is a LIST so `node /path/dist/cli.js` works as well as a `rw` on PATH.
-local config = {
-  rw_cmd = { 'rw' },
-  connect_retries = 15,
-  connect_delay_ms = 200,
-  split = 'botright 15split',
-}
-
-local state = { client = nil, buf = nil, states = {}, address = nil }
+local config = { connect_retries = 15, connect_delay_ms = 200, split = 'botright 15split' }
+local state = { client = nil, buf = nil, states = {} }
 
 local function notify(msg, level)
   vim.notify('rw-ai: ' .. msg, level or vim.log.levels.INFO)
 end
 
-local function cmd(extra)
-  local c = vim.deepcopy(config.rw_cmd)
-  vim.list_extend(c, extra)
-  return c
-end
-
 -- Address from the CLI — the single source of truth, so Lua never re-derives the
 -- sha256 address the daemon uses.
 local function daemon_address()
-  local out = vim.fn.system(cmd({ 'daemon', '--address' }))
-  if vim.v.shell_error ~= 0 then
+  local code, out = cli.run({ 'daemon', '--address' })
+  if code ~= 0 then
     return nil, vim.trim(out)
   end
   return vim.trim(out)
@@ -40,7 +29,7 @@ end
 -- Spawn the daemon detached. Harmless if one already runs: the CLI single-instance
 -- guard makes the second invocation a no-op.
 local function ensure_daemon()
-  vim.fn.jobstart(cmd({ 'daemon' }), { detach = true })
+  cli.spawn({ 'daemon' })
 end
 
 local function ensure_buffer()
@@ -83,7 +72,6 @@ local function connect(address, attempt)
     end,
     on_error = function(err)
       if attempt < config.connect_retries then
-        -- The daemon may still be coming up after ensure_daemon(); back off and retry.
         vim.defer_fn(function()
           connect(address, attempt + 1)
         end, config.connect_delay_ms)
@@ -100,7 +88,6 @@ function M.open_status()
     notify('could not get the daemon address (are you inside an rw repo?): ' .. (err or ''), vim.log.levels.ERROR)
     return
   end
-  state.address = address
   ensure_daemon()
 
   local buf = ensure_buffer()
@@ -115,6 +102,10 @@ function M.open_status()
   connect(address, 1)
 end
 
+function M.review(session_id)
+  review.open(session_id)
+end
+
 function M.close()
   if state.client then
     state.client.close()
@@ -125,7 +116,7 @@ end
 function M.setup(opts)
   opts = opts or {}
   if opts.rw_cmd then
-    config.rw_cmd = type(opts.rw_cmd) == 'string' and { opts.rw_cmd } or opts.rw_cmd
+    cli.set_cmd(opts.rw_cmd)
   end
   if opts.split then
     config.split = opts.split
@@ -133,6 +124,9 @@ function M.setup(opts)
   vim.api.nvim_create_user_command('RwStatus', function()
     M.open_status()
   end, { desc = 'rw-ai: live session status dashboard' })
+  vim.api.nvim_create_user_command('RwReview', function(a)
+    M.review(a.args)
+  end, { nargs = 1, desc = 'rw-ai: review a session (:RwReview <id>)' })
 end
 
 return M

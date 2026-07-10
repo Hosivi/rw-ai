@@ -65,6 +65,13 @@ local decoded = vim.json.decode(
 local null_body = table.concat(status.render(decoded), '\n')
 check('render null phase as dash (vim.NIL handled)', null_body:find('vim.NIL') == nil and null_body:find('s9') ~= nil)
 
+-- modules load without syntax errors (they require Neovim's vim.* at call time,
+-- but requiring them must not error)
+check('cli module loads', pcall(require, 'rw-ai.cli'))
+check('review module loads', pcall(require, 'rw-ai.review'))
+check('init module loads', pcall(require, 'rw-ai.init'))
+check('rpc module loads', pcall(require, 'rw-ai.rpc'))
+
 if ok_all then
   print('ALL PASS')
 else
