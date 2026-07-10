@@ -1,6 +1,6 @@
 import path from 'node:path';
-import { resolveBoardDir } from '../../contract/env.js';
-import { forceFreeRole } from '../../engine/identity.js';
+import { ENV_KEYS, resolveBoardDir } from '../../contract/env.js';
+import { releaseRole, whoami } from '../../engine/identity.js';
 import { normalizeRepoPath } from '../../engine/git.js';
 import { blastRadius } from '../../codegraph/blast-radius.js';
 import { renderAsciiDiagram } from '../../codegraph/diagram.js';
@@ -101,8 +101,12 @@ export const runBlast = async (
 
 // `rw decide <session> --approve|--reject [--comment "..."]`: record a review
 // decision and release the integrator claim so the next review can proceed.
-// The decision record is the authoritative log (who/when/verdict); the claim is
-// force-released because the act of deciding concludes the review.
+//
+// AUTHORITY: only the current integrator may decide. The caller must hold the
+// `integrator` claim, proven by RW_TOKEN — the decision is attributed to that
+// identity and the claim is released with releaseRole (token-checked), NOT
+// force-freed. This keeps claims single-owned: `rw decide` can never kick a
+// different integrator off their claim.
 export const runDecide = async (
   args: {
     readonly session: string | undefined;
@@ -127,18 +131,35 @@ export const runDecide = async (
   }
   const boardDir = resolveBoardDir(projectRoot, config);
 
+  // Prove the caller IS the integrator before recording or releasing anything.
+  const token = deps.env[ENV_KEYS.token];
+  if (token === undefined || token === '') {
+    return {
+      lines: [
+        'Para decidir necesitas el rol integrator. Reclámalo con `rw claim integrator` y exporta RW_TOKEN.',
+      ],
+      exitCode: 1,
+    };
+  }
+  const who = await whoami({ config, boardDir, token, now: deps.now });
+  if (!who.ok || who.value === null || who.value.role !== 'integrator') {
+    return { lines: ['Tu RW_TOKEN no corresponde al rol integrator (reclámalo primero).'], exitCode: 1 };
+  }
+  const reviewer = who.value.claim.status === 'claimed' ? who.value.claim.agent : undefined;
+
   const written = await writeDecision(boardDir, {
     version: 1,
     sessionId: args.session,
     verdict: args.verdict,
     ...(args.comment !== undefined && args.comment !== '' ? { comment: args.comment } : {}),
     decidedAt: deps.now.toISOString(),
+    ...(reviewer !== undefined ? { reviewer } : {}),
   });
   if (!written.ok) {
     return { lines: [`No se pudo registrar la decisión: ${written.error.message}`], exitCode: 1 };
   }
 
-  const released = await forceFreeRole(config, boardDir, 'integrator', deps.now);
+  const released = await releaseRole({ config, boardDir, role: 'integrator', token, now: deps.now });
   if (!released.ok) {
     return {
       lines: [

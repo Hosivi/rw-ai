@@ -47,7 +47,12 @@ export const queryCodeGraph = async (
   }
 
   // Ask CodeGraph about exactly the changed files; --json keeps parsing robust.
-  const result = await runRaw('codegraph', ['explore', '--json', ...changedFiles], { cwd: repoRoot });
+  // The `--` guard stops a filename that begins with '-' (git allows those) from
+  // being parsed as a flag by the codegraph binary. shell:false already rules out
+  // OS command injection.
+  const result = await runRaw('codegraph', ['explore', '--json', '--', ...changedFiles], {
+    cwd: repoRoot,
+  });
   if (!result.ok || result.value.exitCode !== 0) {
     return { available: false, reason: 'CodeGraph CLI unavailable or failed' };
   }
