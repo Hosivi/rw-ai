@@ -1,6 +1,6 @@
 {
   "name": "rw-ai",
-  "version": "0.1.0",
+  "version": "0.5.0",
   "description": "Configure a repository so N parallel AI agent sessions work without git, port, or database conflicts.",
   "type": "module",
   "bin": {
