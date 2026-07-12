@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { err, ok } from '../core/result.js';
 import { unwrap, unwrapErr } from '../core/result.test-support.js';
 import { runCommand, runCommandRaw, type CommandRunner } from './exec.js';
 import {
@@ -163,6 +164,33 @@ describe('parseMergeTreeConflicts', () => {
       '\n',
     );
     expect(parseMergeTreeConflicts(stdout)).toEqual(['real.txt']);
+  });
+});
+
+describe('createGit commonDir (mocked exec)', () => {
+  it('resolves a relative --git-common-dir against the bound repoRoot', async () => {
+    // A linked worktree's `git rev-parse --git-common-dir` returns a RELATIVE
+    // path (bare `.git`); callers need an absolute path to write into.
+    const repoRoot = path.join(os.tmpdir(), 'rw-ai-common');
+    const run: CommandRunner = () =>
+      Promise.resolve(ok({ stdout: '.git\n', stderr: '', exitCode: 0 }));
+    const git = createGit(repoRoot, run);
+    expect(unwrap(await git.commonDir())).toBe(path.resolve(repoRoot, '.git'));
+  });
+
+  it('passes through an already-absolute --git-common-dir unchanged', async () => {
+    const absolute = path.join(os.tmpdir(), 'shared', '.git');
+    const run: CommandRunner = () =>
+      Promise.resolve(ok({ stdout: `${absolute}\n`, stderr: '', exitCode: 0 }));
+    const git = createGit(path.join(os.tmpdir(), 'rw-ai-linked'), run);
+    expect(unwrap(await git.commonDir())).toBe(path.resolve(absolute));
+  });
+
+  it('propagates a GitError on failure', async () => {
+    const run: CommandRunner = () =>
+      Promise.resolve(err({ kind: 'spawn-failed', message: 'git missing' }));
+    const git = createGit('/repo', run);
+    expect(unwrapErr(await git.commonDir()).kind).toBe('spawn-failed');
   });
 });
 

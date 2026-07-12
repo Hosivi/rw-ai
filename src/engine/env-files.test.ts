@@ -7,6 +7,7 @@ import {
   MANAGED_BLOCK_END,
   MANAGED_BLOCK_START,
   renderManagedBlock,
+  SESSION_ENV_FILENAME,
   upsertEnvFile,
   writeSessionEnvFiles,
 } from './env-files.js';
@@ -102,6 +103,10 @@ describe('upsertEnvFile', () => {
 });
 
 describe('writeSessionEnvFiles', () => {
+  it('writes each file under the shared SESSION_ENV_FILENAME', () => {
+    expect(SESSION_ENV_FILENAME).toBe('.env.local');
+  });
+
   it('writes one .env.local per active session into its worktree dir', async () => {
     const config = buildConfig();
     for (const session of config.sessions) {

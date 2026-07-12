@@ -99,6 +99,60 @@ export const ensureGitignoreEntry = async (
   }
 };
 
+export type ExcludeEnsureResult = {
+  readonly added: string[];
+  // 'created' (no info/exclude existed), 'updated' (appended some patterns),
+  // 'exists' (all patterns already present — no write).
+  readonly action: 'created' | 'updated' | 'exists';
+};
+
+// rw's generated session artifacts (.env.local, node_modules/) live INSIDE each
+// linked worktree, so a .gitignore in the main checkout cannot hide them and
+// committing an ignore into a session branch would pollute it. The shared
+// info/exclude of the common git dir is honoured by EVERY worktree, is never
+// committed, and touches no branch — one write covers them all. Mirrors
+// ensureGitignoreEntry's read/normalize/dedupe/append shape.
+export const ensureExcludeEntries = async (
+  gitCommonDir: string,
+  patterns: readonly string[],
+): Promise<Result<ExcludeEnsureResult, GitignoreEnsureError>> => {
+  const excludePath = path.join(gitCommonDir, 'info', 'exclude');
+  let content: string | null = null;
+  try {
+    content = await fs.readFile(excludePath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      return err({ message: `could not read ${excludePath}: ${errorMessage(error)}`, cause: error });
+    }
+  }
+  try {
+    // info/ almost always exists, but a degraded/freshly-cloned repo may lack
+    // it; create it defensively so the write is self-contained.
+    await fs.mkdir(path.dirname(excludePath), { recursive: true });
+    if (content === null) {
+      await fs.writeFile(excludePath, `${patterns.join('\n')}\n`, 'utf8');
+      return ok({ added: [...patterns], action: 'created' });
+    }
+    const lines = content.split(/\r?\n/);
+    // Canonical compare against trimmed existing lines (git's own exclude may
+    // carry CRLF or padding); only genuinely-absent patterns are appended.
+    const present = new Set(lines.map((line) => line.trim()));
+    const added = patterns.filter((pattern) => !present.has(pattern));
+    if (added.length === 0) {
+      return ok({ added: [], action: 'exists' });
+    }
+    // Rewrite with LF endings and a single trailing newline; every non-empty
+    // existing line is preserved as-is.
+    while (lines.at(-1) === '') {
+      lines.pop();
+    }
+    await fs.writeFile(excludePath, `${[...lines, ...added].join('\n')}\n`, 'utf8');
+    return ok({ added, action: 'updated' });
+  } catch (error) {
+    return err({ message: `could not write ${excludePath}: ${errorMessage(error)}`, cause: error });
+  }
+};
+
 export type DepsInstallResult = {
   readonly stack: Stack;
   readonly action: 'installed' | 'skipped';

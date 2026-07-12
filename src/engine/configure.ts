@@ -10,13 +10,18 @@ import { writeBranchGraph } from './branch-graph.js';
 import { ensureIntegrationBranch, ensureSessionBranches } from './branches.js';
 import { writeAgentsConfig } from './config-io.js';
 import { ensureSessionDatabases, type SessionDbResult } from './database.js';
-import { writeSessionEnvFiles } from './env-files.js';
+import { SESSION_ENV_FILENAME, writeSessionEnvFiles } from './env-files.js';
 import { runCommand, runCommandRaw, type CommandRunner } from './exec.js';
 import { createGit, MIN_GIT_VERSION, supportsMergeTree, type GitError } from './git.js';
 import { forceFreeRole, readClaims, writeClaims } from './identity.js';
 import { activeSessions } from './sessions.js';
 import { generateWiringPlan, renderWiringDoc } from './test-wiring.js';
-import { ensureGitignoreEntry, ensureWorktrees, installWorktreeDeps } from './worktrees.js';
+import {
+  ensureExcludeEntries,
+  ensureGitignoreEntry,
+  ensureWorktrees,
+  installWorktreeDeps,
+} from './worktrees.js';
 
 // The runbook never throws: each provisioning step aggregates into a status so a
 // single pass surfaces every problem instead of aborting on the first one.
@@ -137,10 +142,22 @@ const runWorktreesStep = async (
   if (!ignore.ok) {
     return { name: 'worktrees', status: 'failed', detail: ignore.error.message };
   }
+  // The env-files and worktree-deps steps generate artifacts (.env.local,
+  // node_modules/) INSIDE each session worktree; recording them in the shared
+  // info/exclude keeps every session tree clean without committing an ignore to
+  // any session branch. The common git dir is shared across all linked worktrees.
+  const commonDir = await git.commonDir();
+  if (!commonDir.ok) {
+    return { name: 'worktrees', status: 'failed', detail: describeGitError(commonDir.error) };
+  }
+  const exclude = await ensureExcludeEntries(commonDir.value, [SESSION_ENV_FILENAME, 'node_modules/']);
+  if (!exclude.ok) {
+    return { name: 'worktrees', status: 'failed', detail: exclude.error.message };
+  }
   return {
     name: 'worktrees',
     status: 'ok',
-    detail: `worktrees: ${summarizeActions(worktrees.value.map((entry) => entry.action))}; gitignore ${ignore.value.action}`,
+    detail: `worktrees: ${summarizeActions(worktrees.value.map((entry) => entry.action))}; gitignore ${ignore.value.action}; exclude ${exclude.value.action}`,
   };
 };
 

@@ -10,7 +10,12 @@ import { ensureIntegrationBranch, ensureSessionBranches } from './branches.js';
 import type { CommandRunner } from './exec.js';
 import { createGit, type Git } from './git.js';
 import { buildConfig, createTempRepo, removeDirRobust, type TempRepo } from './git.test-support.js';
-import { ensureGitignoreEntry, ensureWorktrees, installWorktreeDeps } from './worktrees.js';
+import {
+  ensureExcludeEntries,
+  ensureGitignoreEntry,
+  ensureWorktrees,
+  installWorktreeDeps,
+} from './worktrees.js';
 
 describe('ensureWorktrees (integration)', () => {
   let repo: TempRepo;
@@ -96,6 +101,59 @@ describe('ensureGitignoreEntry', () => {
     await fs.writeFile(gitignorePath(), '.worktrees/\n');
     expect(unwrap(await ensureGitignoreEntry(dir, '.worktrees'))).toEqual({ action: 'exists' });
     expect(await fs.readFile(gitignorePath(), 'utf8')).toBe('.worktrees/\n');
+  });
+});
+
+describe('ensureExcludeEntries', () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'rw-ai-exclude-'));
+  });
+
+  afterEach(async () => {
+    await removeDirRobust(dir);
+  });
+
+  const excludePath = (): string => path.join(dir, 'info', 'exclude');
+
+  it('creates info/exclude with exactly the given patterns when missing', async () => {
+    expect(unwrap(await ensureExcludeEntries(dir, ['.env.local', 'node_modules/']))).toEqual({
+      added: ['.env.local', 'node_modules/'],
+      action: 'created',
+    });
+    expect(await fs.readFile(excludePath(), 'utf8')).toBe('.env.local\nnode_modules/\n');
+  });
+
+  it('appends only missing patterns, preserving prior lines with LF and one trailing newline', async () => {
+    await fs.mkdir(path.join(dir, 'info'), { recursive: true });
+    await fs.writeFile(excludePath(), '# git ls-files exclude\r\n.env.local\r\n\r\n');
+    expect(unwrap(await ensureExcludeEntries(dir, ['.env.local', 'node_modules/']))).toEqual({
+      added: ['node_modules/'],
+      action: 'updated',
+    });
+    expect(await fs.readFile(excludePath(), 'utf8')).toBe(
+      '# git ls-files exclude\n.env.local\nnode_modules/\n',
+    );
+  });
+
+  it('is a no-op reporting exists when every pattern is already present', async () => {
+    await fs.mkdir(path.join(dir, 'info'), { recursive: true });
+    await fs.writeFile(excludePath(), 'node_modules/\n.env.local\n');
+    expect(unwrap(await ensureExcludeEntries(dir, ['.env.local', 'node_modules/']))).toEqual({
+      added: [],
+      action: 'exists',
+    });
+    expect(await fs.readFile(excludePath(), 'utf8')).toBe('node_modules/\n.env.local\n');
+  });
+
+  it('normalizes CRLF when matching existing patterns', async () => {
+    await fs.mkdir(path.join(dir, 'info'), { recursive: true });
+    await fs.writeFile(excludePath(), '.env.local\r\nnode_modules/\r\n');
+    expect(unwrap(await ensureExcludeEntries(dir, ['.env.local', 'node_modules/']))).toEqual({
+      added: [],
+      action: 'exists',
+    });
   });
 });
 

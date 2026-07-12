@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { err, ok, type Result } from '../core/result.js';
 import {
   runCommand,
@@ -134,6 +135,11 @@ export type Git = {
   ) => Promise<Result<MergeTreeResult, GitError>>;
   readonly createBranch: (name: string, from: string) => Promise<Result<void, GitError>>;
   readonly currentBranch: () => Promise<Result<string, GitError>>;
+  // The git dir SHARED across all linked worktrees (the main repo's `.git`).
+  // Anything written under it — e.g. info/exclude — is honoured by every
+  // worktree and never committed. Returned absolute, even though git may print
+  // it relative to the bound repoRoot.
+  readonly commonDir: () => Promise<Result<string, GitError>>;
   // Read model: how far THIS working tree's HEAD has diverged from a base ref.
   // Bind via createGit(worktreePath, ...) to ask per-session. "Can't tell"
   // (unknown base, unrelated history, detached with no merge-base) → {0,0}, not
@@ -253,6 +259,14 @@ export const createGit = (
   const currentBranch: Git['currentBranch'] = async () => {
     const result = await inRepo(['rev-parse', '--abbrev-ref', 'HEAD']);
     return result.ok ? ok(trimmedStdout(result.value)) : result;
+  };
+
+  const commonDir: Git['commonDir'] = async () => {
+    // `--git-common-dir` returns the shared git dir, but as a path RELATIVE to
+    // repoRoot for the main worktree (bare `.git`); resolve it so callers get a
+    // stable absolute path regardless of the current working directory.
+    const result = await inRepo(['rev-parse', '--git-common-dir']);
+    return result.ok ? ok(path.resolve(repoRoot, trimmedStdout(result.value))) : result;
   };
 
   const aheadBehind: Git['aheadBehind'] = async (base) => {
@@ -386,6 +400,7 @@ export const createGit = (
     mergeTree,
     createBranch,
     currentBranch,
+    commonDir,
     aheadBehind,
     listWorktrees,
     addWorktree,

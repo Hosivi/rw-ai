@@ -8,6 +8,11 @@ import { activeSessions } from './sessions.js';
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
+// The per-session env filename. Single source of truth so the writer here and
+// the info/exclude ignore pattern (configure.ts) can never drift apart, in the
+// same spirit as PORT_BAND_NAMES.
+export const SESSION_ENV_FILENAME = '.env.local';
+
 // Everything between these markers is owned by rw-ai and rewritten on every
 // run; everything outside them is user territory and preserved byte-for-byte.
 export const MANAGED_BLOCK_START = '# >>> rw-ai managed >>>';
@@ -114,7 +119,7 @@ export const writeSessionEnvFiles = async (
 ): Promise<Result<SessionEnvFileResult[], EnvFileOperationError>> => {
   const results: SessionEnvFileResult[] = [];
   for (const session of activeSessions(config)) {
-    const filePath = path.join(projectRoot, session.worktree, '.env.local');
+    const filePath = path.join(projectRoot, session.worktree, SESSION_ENV_FILENAME);
     const upserted = await upsertEnvFile(filePath, sessionEnvEntries(config, session, projectRoot));
     if (!upserted.ok) {
       return err({
