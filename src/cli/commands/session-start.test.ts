@@ -6,7 +6,7 @@ import { buildConfig } from '../../engine/git.test-support.js';
 import { setupMcpRepo, type McpRepo } from '../../mcp/mcp.test-support.js';
 import { unwrap } from '../../core/result.test-support.js';
 import { readSessionMarker } from '../../state/marker.js';
-import type { CliDeps } from '../command.js';
+import type { CliDeps, CommandResult } from '../command.js';
 import { runSessionStart } from './session-start.js';
 
 const NOW = new Date('2026-07-04T12:00:00.000Z');
@@ -16,14 +16,16 @@ const NOW = new Date('2026-07-04T12:00:00.000Z');
 const gitNotARepo: CommandRunner = async () =>
   err({ kind: 'non-zero-exit', output: { stdout: '', stderr: 'fatal: not a git repository', exitCode: 128 } });
 
-// The hook emits ONE JSON line (the SessionStart contract); parse it back and read
-// the injected additionalContext so the tests assert on the surfaced text.
-const parseAdditionalContext = (lines: readonly string[]): string => {
-  const parsed = JSON.parse(lines[0] ?? '{}') as {
-    hookSpecificOutput?: { additionalContext?: string };
-  };
-  return parsed.hookSpecificOutput?.additionalContext ?? '';
+// A runner that THROWS rather than returning an err, to prove the outer catch
+// fails open too — an unexpected throw must still collapse to the generic offer.
+const gitThrows: CommandRunner = async () => {
+  throw new Error('boom');
 };
+
+// The hook now surfaces its message to the HUMAN via stderr + exit 2 (the same
+// channel `rw lane-guard` uses), so tests read the joined stderr lines; stdout
+// (`lines`) is empty because Claude Code ignores it when a hook exits 2.
+const stderrText = (result: CommandResult): string => (result.stderr ?? []).join('\n');
 
 describe('runSessionStart', () => {
   const run = (
@@ -42,28 +44,33 @@ describe('runSessionStart', () => {
   };
 
   describe('outside a configured repo', () => {
-    it('offers rw_bootstrap (never auto-runs) and exits 0 with the SessionStart shape', async () => {
+    it('offers rw_bootstrap (never auto-runs) on stderr + exit 2 so the human sees it', async () => {
       const result = await run({ cwd: '/anywhere', stdin: '', run: gitNotARepo });
-      expect(result.exitCode).toBe(0);
-      // The exact Claude Code SessionStart hook contract.
-      const parsed = JSON.parse(result.lines[0] ?? '{}') as {
-        hookSpecificOutput?: { hookEventName?: string };
-      };
-      expect(parsed.hookSpecificOutput?.hookEventName).toBe('SessionStart');
-      const ctx = parseAdditionalContext(result.lines);
+      // stderr + exit 2 is the only channel Claude Code renders to the human.
+      expect(result.exitCode).toBe(2);
+      expect(result.lines).toHaveLength(0);
+      const ctx = stderrText(result);
       expect(ctx).toContain('rw-ai disponible');
       expect(ctx).toContain('rw_bootstrap');
       expect(ctx).toContain('NO se hace nada automáticamente');
     });
 
-    it('fails open (exit 0) on garbage stdin', async () => {
+    it('fails open (exit 2, generic offer on stderr) on garbage stdin', async () => {
       const result = await run({ cwd: '/anywhere', stdin: 'not json {', run: gitNotARepo });
-      expect(result.exitCode).toBe(0);
+      expect(result.exitCode).toBe(2);
     });
 
-    it('fails open (exit 0) on empty stdin', async () => {
+    it('fails open (exit 2, generic offer on stderr) on empty stdin', async () => {
       const result = await run({ cwd: '/anywhere', stdin: '', run: gitNotARepo });
-      expect(result.exitCode).toBe(0);
+      expect(result.exitCode).toBe(2);
+    });
+
+    it('fails open to the generic offer on stderr + exit 2 when resolution throws', async () => {
+      // The outer catch must swallow any unexpected throw, never break startup.
+      const result = await run({ cwd: '/anywhere', stdin: '', run: gitThrows });
+      expect(result.exitCode).toBe(2);
+      expect(result.lines).toHaveLength(0);
+      expect(stderrText(result)).toContain('rw_bootstrap');
     });
   });
 
@@ -80,8 +87,9 @@ describe('runSessionStart', () => {
 
     it('at the shared root reports the repo configured with N active sessions', async () => {
       const result = await run({ cwd: mcp.repo.root, stdin: '' });
-      expect(result.exitCode).toBe(0);
-      const ctx = parseAdditionalContext(result.lines);
+      expect(result.exitCode).toBe(2);
+      expect(result.lines).toHaveLength(0);
+      const ctx = stderrText(result);
       expect(ctx).toContain('configurado');
       expect(ctx).toContain('2 sesiones');
       expect(ctx).toContain('rw_status');
@@ -89,17 +97,18 @@ describe('runSessionStart', () => {
 
     it('inside a session worktree names the session, branch and areas + the lane guard', async () => {
       const result = await run({ cwd: mcp.worktreePath('s1'), stdin: '' });
-      expect(result.exitCode).toBe(0);
-      const ctx = parseAdditionalContext(result.lines);
+      expect(result.exitCode).toBe(2);
+      expect(result.lines).toHaveLength(0);
+      const ctx = stderrText(result);
       expect(ctx).toContain('sesión s1');
       expect(ctx).toContain('rw_claim');
       expect(ctx).toContain('lane-guard');
     });
 
-    it('still exits 0 with the configured context on garbage stdin (fail-open)', async () => {
+    it('still exits 2 with the configured context on garbage stdin (fail-open)', async () => {
       const result = await run({ cwd: mcp.worktreePath('s1'), stdin: '}{ garbage' });
-      expect(result.exitCode).toBe(0);
-      expect(parseAdditionalContext(result.lines)).toContain('sesión s1');
+      expect(result.exitCode).toBe(2);
+      expect(stderrText(result)).toContain('sesión s1');
     });
 
     it('writes a working marker for the session it opened in', async () => {

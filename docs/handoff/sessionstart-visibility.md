@@ -1,8 +1,8 @@
 # Handoff: make the rw SessionStart offer visible to the human
 
-**Status:** NOT implemented — ready to pick up.
+**Status:** IMPLEMENTED — `rw session-start` now emits its offer via stderr + exit 2, so the human sees it on session open. Verified end-to-end by driving the hook in an unconfigured dir, the shared root, and a session worktree (exit 2, empty stdout, message on stderr).
 **Type:** small behavior change in one file + test updates.
-**Owner:** unassigned (another agent will implement).
+**Owner:** done.
 
 ---
 

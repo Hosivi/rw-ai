@@ -194,16 +194,23 @@ describe('runCli', () => {
     expect(lines.join('\n')).toContain('session-start');
   });
 
-  it('routes session-start and fails open (exit 0) outside a repo', async () => {
+  it('routes session-start and fails open (exit 2, offer on stderr) outside a repo', async () => {
     // The SessionStart hook must never break startup: even outside a repo it emits
-    // the offer context and exits 0, proving it was routed (not unknown).
-    const { lines, deps } = capture({ cwd: '/anywhere', run: gitNotARepo, runRaw: gitNotARepo });
+    // the offer to the HUMAN via stderr + exit 2 (not stdout), proving it was routed.
+    const errLines: string[] = [];
+    const { lines, deps } = capture({
+      cwd: '/anywhere',
+      run: gitNotARepo,
+      runRaw: gitNotARepo,
+      writeErr: (line) => errLines.push(line),
+    });
     const code = await runCli(['session-start'], deps);
-    expect(code).toBe(0);
-    const text = lines.join('\n');
+    expect(code).toBe(2);
+    // The offer lands on stderr, never on stdout.
+    expect(lines).toHaveLength(0);
+    const text = errLines.join('\n');
     expect(text).not.toContain('Comando desconocido');
     expect(text).toContain('rw_bootstrap');
-    expect(text).toContain('SessionStart');
   });
 
   it('routes a real command to its handler', async () => {
