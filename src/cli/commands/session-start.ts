@@ -66,20 +66,27 @@ export const runSessionStart = async (
       }
 
       // Inside a session worktree: point the agent at its role and the lane guard.
+      // The human sees NOTHING at startup (additionalContext reaches only the
+      // model), so the agent is explicitly told to surface this in its first
+      // reply — that is the visibility channel now that stderr/exit-2 was rejected.
       const areas = currentSession.areas.join(', ');
       return sessionStartOutput(
         `Estás en la sesión ${currentSession.id} (rama ${currentSession.branch}). ` +
-          `Áreas: ${areas}. Reclama el rol con la tool rw_claim. ` +
-          'El hook rw lane-guard bloquea escrituras fuera de tus áreas.',
+          `Áreas: ${areas}. En tu PRIMERA respuesta: infórmale al usuario que está en ` +
+          `la sesión ${currentSession.id} con ese carril y ofrécele reclamar el rol con ` +
+          'la tool rw_claim. El hook rw lane-guard bloquea escrituras fuera de tus áreas.',
       );
     }
 
     // Configured but at the shared root: the agent must open inside a worktree to
-    // act as a session. Surface the read-only tools it can use from here.
+    // act as a session. Same visibility rule: the agent presents the free roles in
+    // its first reply so the human learns which session/worktree to take.
     const count = activeSessions(config).length;
     return sessionStartOutput(
-      `Repo rw configurado con ${count} sesiones activas. Para trabajar como una sesión, ` +
-        'abre el agente dentro de .worktrees/<id>. Tools: rw_status, rw_check, rw_roles.',
+      `Repo rw configurado con ${count} sesiones activas. En tu PRIMERA respuesta: ` +
+        'corre la tool rw_roles y preséntale al usuario los roles libres para que elija ' +
+        'cuál tomar; para trabajar como sesión se abre el agente dentro de ' +
+        '.worktrees/<id>. Tools: rw_status, rw_check, rw_roles.',
     );
   } catch {
     // Truly unexpected: still exit 0 with the generic offer, never propagate.

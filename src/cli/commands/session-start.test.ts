@@ -85,6 +85,10 @@ describe('runSessionStart', () => {
       expect(ctx).toContain('configurado');
       expect(ctx).toContain('2 sesiones');
       expect(ctx).toContain('rw_status');
+      // The agent must present the free roles in its FIRST reply — the human sees
+      // nothing at startup, so this directive is the only visibility path.
+      expect(ctx).toContain('PRIMERA respuesta');
+      expect(ctx).toContain('rw_roles');
     });
 
     it('inside a session worktree names the session, branch and areas + the lane guard', async () => {
@@ -94,6 +98,7 @@ describe('runSessionStart', () => {
       expect(ctx).toContain('sesión s1');
       expect(ctx).toContain('rw_claim');
       expect(ctx).toContain('lane-guard');
+      expect(ctx).toContain('PRIMERA respuesta');
     });
 
     it('still exits 0 with the configured context on garbage stdin (fail-open)', async () => {
