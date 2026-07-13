@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 import os from 'node:os';
-import { runCli } from './cli/run.js';
-import { startRwMcpServer } from './mcp/server.js';
+
+// Cold-start latency is the product here: the lane-guard/session-start hooks run
+// on EVERY agent Write/Edit and session open, so the bin must not statically load
+// the MCP SDK graph (~230ms) or the full command graph behind run.js (~193ms).
+// Both fan-out points are imported lazily inside main() for the branch taken.
 
 // The stdin-driven hooks: both read a Claude Code hook payload from stdin (the
 // PreToolUse payload for `lane-guard`, the SessionStart payload for `session-start`).
@@ -30,12 +33,14 @@ const main = async (): Promise<void> => {
   // runCli/CommandResult exit-code flow (it never returns while stdio is open),
   // so it is intercepted before routing.
   if (process.argv[2] === 'mcp') {
+    const { startRwMcpServer } = await import('./mcp/server.js');
     await startRwMcpServer();
     return;
   }
   // Only the hooks consume stdin; every other command leaves it untouched so the
   // change stays isolated to the stdin-driven hook commands.
   const stdin = STDIN_COMMANDS.has(process.argv[2] ?? '') ? await readStdin() : undefined;
+  const { runCli } = await import('./cli/run.js');
   const code = await runCli(process.argv.slice(2), {
     cwd: process.cwd(),
     homeDir: os.homedir(),

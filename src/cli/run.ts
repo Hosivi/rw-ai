@@ -8,22 +8,6 @@ import {
   type Stack,
 } from '../contract/schema.js';
 import type { CliDeps, CommandResult } from './command.js';
-import { runAdapters } from './commands/adapters.js';
-import { runBootstrap } from './commands/bootstrap.js';
-import { runCheck } from './commands/check.js';
-import { runSessions } from './commands/claude-sessions.js';
-import { runDaemon } from './commands/daemon.js';
-import { runConfigure } from './commands/configure.js';
-import { runClaim, runInit, runRoles, runRelease, runWhoami } from './commands/identity.js';
-import { runLane } from './commands/lane.js';
-import { runLaneGuard } from './commands/lane-guard.js';
-import { runFinish } from './commands/lifecycle.js';
-import { runBlast, runDecide, runReviewInfo } from './commands/review.js';
-import { runScaffold } from './commands/scaffold.js';
-import { runSessionStart } from './commands/session-start.js';
-import { runStatus } from './commands/status.js';
-import { runAddSession, runArchive } from './commands/sessions.js';
-import { runTokens } from './commands/tokens.js';
 import { printLines } from './output.js';
 import { readVersion } from './version.js';
 
@@ -218,6 +202,9 @@ const route = async (argv: readonly string[], deps: CliDeps): Promise<CommandRes
     return usageError(`TTL inválido '${values.ttl}'. Pasa un número de horas mayor que 0.`);
   }
 
+  // Command modules load lazily, one per case: the bin runs as a Claude Code hook
+  // on every agent action, so each invocation pays only for the module it actually
+  // dispatches to instead of the whole ~20-command graph (~330ms of cold start).
   switch (command) {
     case 'bootstrap': {
       const sessions = parseSessions(values.sessions);
@@ -232,6 +219,7 @@ const route = async (argv: readonly string[], deps: CliDeps): Promise<CommandRes
       if (remote !== undefined && remote.trim() === '') {
         return usageError('Remote inválido. Pasa una URL no vacía.');
       }
+      const { runBootstrap } = await import('./commands/bootstrap.js');
       return runBootstrap(
         {
           ...(sessions !== undefined ? { sessions } : {}),
@@ -262,6 +250,7 @@ const route = async (argv: readonly string[], deps: CliDeps): Promise<CommandRes
       if (baseBranch !== undefined && baseBranch.trim() === '') {
         return usageError('Rama base inválida. Pasa un nombre de rama no vacío.');
       }
+      const { runScaffold } = await import('./commands/scaffold.js');
       return runScaffold(
         {
           ...(sessions !== undefined ? { sessions } : {}),
@@ -273,59 +262,99 @@ const route = async (argv: readonly string[], deps: CliDeps): Promise<CommandRes
         deps,
       );
     }
-    case 'configure':
+    case 'configure': {
+      const { runConfigure } = await import('./commands/configure.js');
       return runConfigure(deps);
-    case 'adapters':
+    }
+    case 'adapters': {
+      const { runAdapters } = await import('./commands/adapters.js');
       return runAdapters(
         { worktrees: values.worktrees === true, user: values.user === true },
         deps,
       );
-    case 'status':
+    }
+    case 'status': {
+      const { runStatus } = await import('./commands/status.js');
       return runStatus({ json: values.json === true }, deps);
-    case 'daemon':
+    }
+    case 'daemon': {
+      const { runDaemon } = await import('./commands/daemon.js');
       return runDaemon({ printAddress: values.address === true }, deps);
-    case 'review-info':
+    }
+    case 'review-info': {
+      const { runReviewInfo } = await import('./commands/review.js');
       return runReviewInfo({ session: positionals[1], json: values.json === true }, deps);
-    case 'blast':
+    }
+    case 'blast': {
+      const { runBlast } = await import('./commands/review.js');
       return runBlast({ session: positionals[1] }, deps);
+    }
     case 'decide': {
       if (values.approve === true && values.reject === true) {
         return usageError('No puedes pasar --approve y --reject a la vez.');
       }
       const verdict = values.approve === true ? 'approved' : values.reject === true ? 'rejected' : undefined;
+      const { runDecide } = await import('./commands/review.js');
       return runDecide({ session: positionals[1], verdict, comment: values.comment }, deps);
     }
-    case 'roles':
+    case 'roles': {
+      const { runRoles } = await import('./commands/identity.js');
       return runRoles(deps);
-    case 'init':
+    }
+    case 'init': {
+      const { runInit } = await import('./commands/identity.js');
       return runInit({ role: values.role, agent, ttlMs }, deps);
-    case 'claim':
+    }
+    case 'claim': {
+      const { runClaim } = await import('./commands/identity.js');
       return runClaim({ role: positionals[1], agent, ttlMs }, deps);
-    case 'whoami':
+    }
+    case 'whoami': {
+      const { runWhoami } = await import('./commands/identity.js');
       return runWhoami(deps);
-    case 'release':
+    }
+    case 'release': {
+      const { runRelease } = await import('./commands/identity.js');
       return runRelease({ role: values.role }, deps);
-    case 'finish':
+    }
+    case 'finish': {
+      const { runFinish } = await import('./commands/lifecycle.js');
       return runFinish({ session: positionals[1], newBranch: values['new-branch'] }, deps);
-    case 'add-session':
+    }
+    case 'add-session': {
+      const { runAddSession } = await import('./commands/sessions.js');
       return runAddSession({ areas: parseAreas(values.areas), branch: values.branch }, deps);
-    case 'archive':
+    }
+    case 'archive': {
+      const { runArchive } = await import('./commands/sessions.js');
       return runArchive({ id: positionals[1] }, deps);
-    case 'check':
+    }
+    case 'check': {
+      const { runCheck } = await import('./commands/check.js');
       return runCheck(deps);
-    case 'lane':
+    }
+    case 'lane': {
+      const { runLane } = await import('./commands/lane.js');
       return runLane({ path: positionals[1] }, deps);
-    case 'lane-guard':
+    }
+    case 'lane-guard': {
       // The PreToolUse hook: the bin threads the real stdin through deps.stdin.
+      const { runLaneGuard } = await import('./commands/lane-guard.js');
       return runLaneGuard({ ...deps, stdin: deps.stdin ?? '' });
-    case 'session-start':
+    }
+    case 'session-start': {
       // The SessionStart hook: like lane-guard, it consumes the stdin payload the
       // bin slurps. Fail-open, so a missing stdin is just an empty payload.
+      const { runSessionStart } = await import('./commands/session-start.js');
       return runSessionStart({ ...deps, stdin: deps.stdin ?? '' });
-    case 'sessions':
+    }
+    case 'sessions': {
+      const { runSessions } = await import('./commands/claude-sessions.js');
       return runSessions({ cwd: values.cwd, claim: values.claim === true }, deps);
-    case 'tokens':
+    }
+    case 'tokens': {
       // Positionals after the command are the paths to weigh; flags carry the rest.
+      const { runTokens } = await import('./commands/tokens.js');
       return runTokens(
         {
           paths: positionals.slice(1),
@@ -334,6 +363,7 @@ const route = async (argv: readonly string[], deps: CliDeps): Promise<CommandRes
         },
         deps,
       );
+    }
     default:
       return usageError(`Comando desconocido: ${command}`);
   }
