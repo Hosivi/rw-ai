@@ -106,6 +106,13 @@ Los ejemplos de abajo usan `rw`.
 | `rw session-start` | Hook `SessionStart` para agentes: al abrir la sesión, surface rw y OFRECE `rw_bootstrap` si el repo no está configurado (no es para uso manual) |
 | `rw sessions` | Lista los jobs de Claude Code de la máquina (el store en `~/.claude/jobs`, distinto de las sesiones git de rw) |
 | `rw tokens [rutas...]` | Estima tokens y costo del contenido (`--model <id>`, `--online` para conteo exacto) |
+| `rw status [--json]` | Muestra el estado de cada sesión: claim, git, fase y semáforo (usa el daemon si está corriendo, con fallback a lectura directa) |
+| `rw daemon [--address]` | Corre el observador por-repo (se apaga solo al quedar inactivo); `--address` solo imprime su dirección y sale |
+| `rw review-info <sesión> [--json]` | Muestra la rama, worktree y archivos cambiados de una sesión vs la rama de integración |
+| `rw blast <sesión>` | Diagrama de radio de impacto del diff (archivos → símbolos → llamadores) vía CodeGraph; ASCII si no hay índice |
+| `rw decide <sesión> --approve\|--reject [--comment <texto>]` | Registra la decisión de review (requiere el claim del `integrator`) y libera el rol |
+| `rw uninstall [--purge] [--force] [--worktrees] [--user]` | Quita la integración de rw (MCP + hooks + skills). Con `--purge` elimina también el aprovisionamiento del repo (worktrees, ramas, tablero, config) sin borrar trabajo sucio o sin integrar salvo `--force`. El binario se quita con `npm rm -g rw-ai` |
+| `rw mcp` | Inicia el servidor MCP stdio (los adaptadores lo registran; no es para uso manual) |
 
 Opciones globales: `-v`/`--version` muestra la versión, `-h`/`--help` muestra la ayuda completa.
 
