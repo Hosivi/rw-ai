@@ -216,6 +216,46 @@ describe('runCli', () => {
     expect(text.toLowerCase()).toContain('git');
   });
 
+  it('lists the uninstall command in --help', async () => {
+    const { lines, deps } = capture();
+    const code = await runCli(['--help'], deps);
+    expect(code).toBe(0);
+    expect(lines.join('\n')).toContain('uninstall');
+  });
+
+  it('routes uninstall to its handler (context error exit 1 outside a repo)', async () => {
+    const { lines, deps } = capture({ cwd: '/anywhere', run: gitNotARepo, runRaw: gitNotARepo });
+    const code = await runCli(['uninstall'], deps);
+    expect(code).toBe(1);
+    expect(lines.join('\n')).not.toContain('Comando desconocido');
+    expect(lines.join('\n').toLowerCase()).toContain('git');
+  });
+
+  it('exits 2 when uninstall combines --user with --worktrees', async () => {
+    // --worktrees replicates PROJECT cleanup into worktrees; the user scope has
+    // none, so the combination is a usage error, not a silent ignore.
+    const { lines, deps } = capture();
+    const code = await runCli(['uninstall', '--user', '--worktrees'], deps);
+    expect(code).toBe(2);
+    expect(lines.join('\n')).toContain('--worktrees');
+  });
+
+  it('exits 2 when uninstall combines --purge with --user', async () => {
+    // Purge de-provisions a REPO (worktrees, branches, board, config); the user
+    // scope has none of that, so the combination is a usage error.
+    const { lines, deps } = capture();
+    const code = await runCli(['uninstall', '--purge', '--user'], deps);
+    expect(code).toBe(2);
+    expect(lines.join('\n')).toContain('--purge');
+  });
+
+  it('routes uninstall --purge to its handler (context error exit 1 outside a repo)', async () => {
+    const { lines, deps } = capture({ cwd: '/anywhere', run: gitNotARepo, runRaw: gitNotARepo });
+    const code = await runCli(['uninstall', '--purge', '--force'], deps);
+    expect(code).toBe(1);
+    expect(lines.join('\n')).not.toContain('Comando desconocido');
+  });
+
   it('lists status in --help', async () => {
     const { lines, deps } = capture();
     await runCli(['--help'], deps);

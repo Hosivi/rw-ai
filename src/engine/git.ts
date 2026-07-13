@@ -157,6 +157,14 @@ export type Git = {
   ) => Promise<Result<{ status: 'merged' | 'conflict' }, GitError>>;
   readonly mergeAbort: () => Promise<Result<void, GitError>>;
   readonly deleteBranch: (name: string) => Promise<Result<void, GitError>>;
+  // `git branch -d`: refuses an unmerged branch. The refusal is DATA (the purge
+  // reports it and continues), not an error — only spawn/usage failures error.
+  readonly deleteBranchSafe: (
+    name: string,
+  ) => Promise<Result<{ status: 'deleted' } | { status: 'refused'; reason: string }, GitError>>;
+  // `git worktree remove [--force] <path>`. Callers gate the non-force call on a
+  // clean tree themselves (statusPorcelain), so a refusal here is a real error.
+  readonly removeWorktree: (worktreePath: string, force: boolean) => Promise<Result<void, GitError>>;
   readonly statusPorcelain: () => Promise<Result<string, GitError>>;
   // Bootstrap primitives. initRepo runs in the bound repoRoot even when it is not
   // yet a repo (`git init` creates the metadata there); addRemote is a soft no-op
@@ -352,6 +360,34 @@ export const createGit = (
     return result.ok ? ok(undefined) : result;
   };
 
+  const deleteBranchSafe: Git['deleteBranchSafe'] = async (name) => {
+    // runRaw, not run: -d exits 1 when it refuses (unmerged, or checked out in a
+    // worktree), which is a valid outcome to report, not a failure. Classify by
+    // exit code only; the trimmed stderr rides along as the human-facing reason
+    // (never parsed — git's text is gettext-translated).
+    const result = await runRaw('git', ['branch', '-d', name], { cwd: repoRoot });
+    if (!result.ok) {
+      return result;
+    }
+    if (result.value.exitCode === 0) {
+      return ok({ status: 'deleted' });
+    }
+    if (result.value.exitCode === 1) {
+      return ok({ status: 'refused', reason: result.value.stderr.trim() });
+    }
+    return err({ kind: 'non-zero-exit', output: result.value });
+  };
+
+  const removeWorktree: Git['removeWorktree'] = async (worktreePath, force) => {
+    // --force removes even a dirty tree; without it git refuses dirty/untracked
+    // content, but purge pre-checks cleanliness so that refusal stays exceptional.
+    const args = force
+      ? ['worktree', 'remove', '--force', worktreePath]
+      : ['worktree', 'remove', worktreePath];
+    const result = await inRepo(args);
+    return result.ok ? ok(undefined) : result;
+  };
+
   const statusPorcelain: Git['statusPorcelain'] = async () => {
     const result = await inRepo(['status', '--porcelain']);
     return result.ok ? ok(trimmedStdout(result.value)) : result;
@@ -409,6 +445,8 @@ export const createGit = (
     mergeNoFf,
     mergeAbort,
     deleteBranch,
+    deleteBranchSafe,
+    removeWorktree,
     statusPorcelain,
     initRepo,
     addRemote,

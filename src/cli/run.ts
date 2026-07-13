@@ -37,6 +37,7 @@ const OPTIONS = {
   reject: { type: 'boolean' },
   comment: { type: 'string' },
   claim: { type: 'boolean' },
+  purge: { type: 'boolean' },
   worktrees: { type: 'boolean' },
   user: { type: 'boolean' },
   force: { type: 'boolean' },
@@ -58,6 +59,8 @@ const USAGE: readonly string[] = [
   '                                 Detecta el stack y genera agents.config.json',
   '  configure                      Provisiona ramas, worktrees, bases de datos y el tablero',
   '  adapters [--worktrees] [--user]   Escribe la config del agente (MCP + hooks) y skills de rw; --user instala a nivel usuario para toda sesión de la máquina',
+  '  uninstall [--worktrees] [--user] [--purge] [--force]',
+  '                                 Quita la integración de rw (MCP + hooks + skills) sin tocar tu trabajo; --purge también desprovisiona (worktrees, ramas, tablero y agents.config.json) y --force fuerza lo conservado por seguridad',
   '  status [--json]                Muestra el estado de cada sesión (claim, git, fase, semáforo)',
   '  daemon [--address]             Corre el observador por-repo (se apaga solo al quedar inactivo); --address solo imprime su dirección y sale',
   '  review-info <sesión> [--json]  Muestra la rama, worktree y archivos cambiados de una sesión vs la rama de integración',
@@ -270,6 +273,28 @@ const route = async (argv: readonly string[], deps: CliDeps): Promise<CommandRes
       const { runAdapters } = await import('./commands/adapters.js');
       return runAdapters(
         { worktrees: values.worktrees === true, user: values.user === true },
+        deps,
+      );
+    }
+    case 'uninstall': {
+      // --worktrees replicates PROJECT cleanup into session worktrees; the user
+      // scope has none, so the combination is a usage error, not a silent ignore.
+      if (values.user === true && values.worktrees === true) {
+        return usageError('No puedes pasar --worktrees junto con --user: la limpieza a nivel usuario no toca worktrees.');
+      }
+      // --purge de-provisions a REPO (worktrees, ramas, tablero, config); the
+      // user scope has nothing provisioned, so the combination is a usage error.
+      if (values.user === true && values.purge === true) {
+        return usageError('No puedes pasar --purge junto con --user: la purga desprovisiona un repo, no la máquina.');
+      }
+      const { runUninstall } = await import('./commands/uninstall.js');
+      return runUninstall(
+        {
+          worktrees: values.worktrees === true,
+          user: values.user === true,
+          purge: values.purge === true,
+          force: values.force === true,
+        },
         deps,
       );
     }

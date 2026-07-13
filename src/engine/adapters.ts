@@ -375,9 +375,34 @@ const isPlainObject = (value: unknown): value is JsonObject =>
 // file stabilizes to this shape after the first merge.
 const serializeJson = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
 
+// Parses a raw config into a JSON object, or the shared invalid-JSON hard error:
+// we must never clobber content we cannot safely parse and merge into. `rerun`
+// names the command the user should retry after fixing the file by hand.
+const parseJsonObjectConfig = (
+  filePath: string,
+  raw: string,
+  rerun: string,
+): Result<JsonObject, AdaptersError> => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return err({
+      kind: 'invalid-json',
+      message: `${filePath} existe pero no es JSON válido; arréglalo a mano y vuelve a correr ${rerun} (no lo sobrescribí).`,
+    });
+  }
+  if (!isPlainObject(parsed)) {
+    return err({
+      kind: 'invalid-json',
+      message: `${filePath} existe pero no es un objeto JSON; arréglalo a mano y vuelve a correr ${rerun} (no lo sobrescribí).`,
+    });
+  }
+  return ok(parsed);
+};
+
 // Reads an existing JSON config as an object, or an empty object when absent. A
-// file that exists but is not a JSON object is a HARD error: we must never clobber
-// content we cannot safely parse and merge into.
+// file that exists but is not a JSON object is a HARD error (see parseJsonObjectConfig).
 const readJsonConfig = async (filePath: string): Promise<Result<JsonObject, AdaptersError>> => {
   let raw: string;
   try {
@@ -388,22 +413,7 @@ const readJsonConfig = async (filePath: string): Promise<Result<JsonObject, Adap
     }
     return err({ kind: 'io', message: `could not read ${filePath}: ${errorMessage(error)}`, cause: error });
   }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return err({
-      kind: 'invalid-json',
-      message: `${filePath} existe pero no es JSON válido; arréglalo a mano y vuelve a correr rw adapters (no lo sobrescribí).`,
-    });
-  }
-  if (!isPlainObject(parsed)) {
-    return err({
-      kind: 'invalid-json',
-      message: `${filePath} existe pero no es un objeto JSON; arréglalo a mano y vuelve a correr rw adapters (no lo sobrescribí).`,
-    });
-  }
-  return ok(parsed);
+  return parseJsonObjectConfig(filePath, raw, 'rw adapters');
 };
 
 // Read-merge-write a JSON config idempotently: `merge` gets the parsed (or empty)
@@ -686,4 +696,263 @@ export const installAdapters = async (
   }
 
   return ok({ written });
+};
+
+// --- Removal (rw uninstall) ---------------------------------------------------
+// The exact inverse of the install above: unwire rw's MCP entries, hooks and
+// skills WITHOUT deleting user work. It targets only what installAdapters /
+// installUserAdapters write (same constants, same planned paths), never a glob
+// wipe, and it NEVER creates a file — an absent target is a successful no-op.
+// It takes no platform: the install shape is platform-specific, but removal
+// deletes by KEY (`rw-ai`) and by exact command string, which are the same on
+// every platform.
+
+// 'removed' = a whole rw-owned file was deleted; 'cleaned' = only rw's keys were
+// merged OUT of a shared JSON config; 'absent' = nothing of rw's was there.
+export type AdapterRemoveAction = 'removed' | 'cleaned' | 'absent';
+
+export type AdapterRemoval = {
+  // Absolute path, mirroring AdapterWrite, so callers can report exactly what changed.
+  readonly path: string;
+  readonly action: AdapterRemoveAction;
+};
+
+export type AdaptersRemoveResult = {
+  readonly removed: readonly AdapterRemoval[];
+};
+
+// Read-clean-write a JSON config: `clean` gets the parsed object and returns the
+// object to persist, or null when nothing rw-owned is present (→ 'absent', file
+// untouched). Unlike mergeJsonConfig, an ENOENT is a successful no-op — removal
+// must never create files or directories.
+const cleanJsonConfig = async (
+  filePath: string,
+  clean: (base: JsonObject) => JsonObject | null,
+): Promise<Result<AdapterRemoval, AdaptersError>> => {
+  let raw: string;
+  try {
+    raw = await fs.readFile(filePath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return ok({ path: filePath, action: 'absent' });
+    }
+    return err({ kind: 'io', message: `could not read ${filePath}: ${errorMessage(error)}`, cause: error });
+  }
+  const base = parseJsonObjectConfig(filePath, raw, 'rw uninstall');
+  if (!base.ok) {
+    return base;
+  }
+  const next = clean(base.value);
+  if (next === null) {
+    return ok({ path: filePath, action: 'absent' });
+  }
+  const written = await writeFileIdempotent(filePath, serializeJson(next));
+  if (!written.ok) {
+    return err({ kind: 'io', message: written.error.message, cause: written.error.cause });
+  }
+  return ok({ path: filePath, action: 'cleaned' });
+};
+
+// Deletes ONLY the rw-ai key under `containerKey` (mcpServers / mcp). An emptied
+// container stays as {} — deleting it could break a tool that expects the key,
+// and the install would have left it too. Every other key is preserved verbatim.
+const cleanMcpEntry =
+  (containerKey: string) =>
+  (base: JsonObject): JsonObject | null => {
+    const container = base[containerKey];
+    if (!isPlainObject(container) || !('rw-ai' in container)) {
+      return null;
+    }
+    const { 'rw-ai': _removed, ...rest } = container;
+    return { ...base, [containerKey]: rest };
+  };
+
+// The hook events installAdapters writes into. Removal only inspects these two,
+// so a look-alike group under any other event is out of scope by construction.
+const RW_HOOK_EVENTS = ['PreToolUse', 'SessionStart'] as const;
+const RW_HOOK_COMMANDS: readonly string[] = [LANE_GUARD_COMMAND, SESSION_START_COMMAND];
+
+// A group is rw's only when EVERY hook in it runs one of rw's exact command
+// strings: a group the user extended with their own hook is no longer wholly
+// rw's, so it survives untouched (removal never edits inside a foreign group).
+const isRwHookGroup = (group: unknown): boolean =>
+  isPlainObject(group) &&
+  Array.isArray(group.hooks) &&
+  group.hooks.length > 0 &&
+  group.hooks.every(
+    (hook) =>
+      isPlainObject(hook) &&
+      hook.type === 'command' &&
+      typeof hook.command === 'string' &&
+      RW_HOOK_COMMANDS.includes(hook.command),
+  );
+
+// Filters rw's hook groups out of settings.json. An event array emptied BY this
+// removal drops its key: the install created the key to hold rw's group, so an
+// array we just emptied is rw's leftover — but an array that was ALREADY empty
+// (user state we never touched) is preserved as-is.
+const cleanSettingsJson = (base: JsonObject): JsonObject | null => {
+  if (!isPlainObject(base.hooks)) {
+    return null;
+  }
+  const nextHooks: JsonObject = { ...base.hooks };
+  let changed = false;
+  for (const event of RW_HOOK_EVENTS) {
+    const groups = nextHooks[event];
+    if (!Array.isArray(groups)) {
+      continue;
+    }
+    const kept = groups.filter((group) => !isRwHookGroup(group));
+    if (kept.length === groups.length) {
+      continue; // no rw group under this event — leave it byte-identical
+    }
+    changed = true;
+    if (kept.length > 0) {
+      nextHooks[event] = kept;
+    } else {
+      delete nextHooks[event];
+    }
+  }
+  return changed ? { ...base, hooks: nextHooks } : null;
+};
+
+// Deletes one exact file; ENOENT is the successful 'absent' case (idempotence).
+const removeFileExact = async (filePath: string): Promise<Result<AdapterRemoval, AdaptersError>> => {
+  try {
+    await fs.unlink(filePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return ok({ path: filePath, action: 'absent' });
+    }
+    return err({ kind: 'io', message: `could not remove ${filePath}: ${errorMessage(error)}`, cause: error });
+  }
+  return ok({ path: filePath, action: 'removed' });
+};
+
+// Best-effort cleanup of the per-skill directory: rmdir only succeeds on an
+// empty dir, so a dir still holding user files is left alone by construction
+// (ENOTEMPTY and ENOENT are both fine, never an error).
+const removeDirIfEmpty = async (dirPath: string): Promise<void> => {
+  try {
+    await fs.rmdir(dirPath);
+  } catch {
+    // non-empty or already gone — both are the desired end state
+  }
+};
+
+// The removal mirror of installClaudeConfigs: clean the rw-ai MCP entry and rw's
+// hook groups at a shared root. --worktrees replicates exactly this pair.
+const removeClaudeConfigs = async (root: string): Promise<Result<AdapterRemoval[], AdaptersError>> => {
+  const removed: AdapterRemoval[] = [];
+  const mcp = await cleanJsonConfig(path.join(root, '.mcp.json'), cleanMcpEntry('mcpServers'));
+  if (!mcp.ok) {
+    return mcp;
+  }
+  removed.push(mcp.value);
+  const settings = await cleanJsonConfig(path.join(root, '.claude', 'settings.json'), cleanSettingsJson);
+  if (!settings.ok) {
+    return settings;
+  }
+  removed.push(settings.value);
+  return ok(removed);
+};
+
+// The removal mirror of installAgentConfigs: the two Claude Code files PLUS
+// OpenCode's opencode.json MCP entry. The $schema the install may have added is
+// left alone — it is a harmless editor hint, not rw wiring.
+const removeAgentConfigs = async (root: string): Promise<Result<AdapterRemoval[], AdaptersError>> => {
+  const claude = await removeClaudeConfigs(root);
+  if (!claude.ok) {
+    return claude;
+  }
+  const opencode = await cleanJsonConfig(path.join(root, 'opencode.json'), cleanMcpEntry('mcp'));
+  if (!opencode.ok) {
+    return opencode;
+  }
+  return ok([...claude.value, opencode.value]);
+};
+
+// The user-scope removal: the exact inverse of installUserAdapters, cleaning the
+// same three machine-wide files under `homeDir`. Merge-out only — ~/.claude.json
+// holds the user's projects and history, which must survive untouched.
+export const removeUserAdapters = async (
+  homeDir: string,
+): Promise<Result<AdaptersRemoveResult, AdaptersError>> => {
+  const removed: AdapterRemoval[] = [];
+  const claudeMcp = await cleanJsonConfig(path.join(homeDir, '.claude.json'), cleanMcpEntry('mcpServers'));
+  if (!claudeMcp.ok) {
+    return claudeMcp;
+  }
+  removed.push(claudeMcp.value);
+  const claudeSettings = await cleanJsonConfig(
+    path.join(homeDir, '.claude', 'settings.json'),
+    cleanSettingsJson,
+  );
+  if (!claudeSettings.ok) {
+    return claudeSettings;
+  }
+  removed.push(claudeSettings.value);
+  const opencode = await cleanJsonConfig(
+    path.join(homeDir, '.config', 'opencode', 'opencode.json'),
+    cleanMcpEntry('mcp'),
+  );
+  if (!opencode.ok) {
+    return opencode;
+  }
+  removed.push(opencode.value);
+  return ok({ removed });
+};
+
+export type RemoveAdaptersOptions = {
+  // When true, the two Claude Code config files are ALSO cleaned inside each
+  // active session worktree — the mirror of installAdapters' replication.
+  readonly worktrees?: boolean;
+};
+
+// Removes the cross-agent adapters from a target repo, idempotently: the file
+// set is derived from the SAME planWrites the installer uses, so the remover can
+// never drift from what the installer creates. agents.config.json, worktrees,
+// branches and the board are deliberately out of scope — user work lives there.
+export const removeAdapters = async (
+  projectRoot: string,
+  config: AgentsConfig,
+  options: RemoveAdaptersOptions = {},
+): Promise<Result<AdaptersRemoveResult, AdaptersError>> => {
+  const removed: AdapterRemoval[] = [];
+  for (const { relPath } of planWrites(config)) {
+    const filePath = path.join(projectRoot, relPath);
+    const result = await removeFileExact(filePath);
+    if (!result.ok) {
+      return result;
+    }
+    removed.push(result.value);
+    // Each SKILL.md lives in its own per-skill dir the install created; command
+    // wrappers share .claude/commands, which may hold user files, so only the
+    // skill dirs are candidates for cleanup.
+    if (path.basename(filePath) === 'SKILL.md') {
+      await removeDirIfEmpty(path.dirname(filePath));
+    }
+  }
+
+  // The MCP + hook unwiring at the shared root. A non-JSON existing config
+  // aborts here without clobber, exactly like the install.
+  const rootConfigs = await removeAgentConfigs(projectRoot);
+  if (!rootConfigs.ok) {
+    return rootConfigs;
+  }
+  removed.push(...rootConfigs.value);
+
+  // --worktrees: clean the two Claude Code config files inside each active
+  // worktree, mirroring the install's replication.
+  if (options.worktrees === true) {
+    for (const session of activeSessions(config)) {
+      const worktreeConfigs = await removeClaudeConfigs(path.join(projectRoot, session.worktree));
+      if (!worktreeConfigs.ok) {
+        return worktreeConfigs;
+      }
+      removed.push(...worktreeConfigs.value);
+    }
+  }
+
+  return ok({ removed });
 };

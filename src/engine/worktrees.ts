@@ -153,6 +153,75 @@ export const ensureExcludeEntries = async (
   }
 };
 
+// The removal vocabulary shared by both ignore-surface cleanups: 'cleaned' means
+// rw's lines were filtered out of the file, 'absent' means neither the file nor
+// the lines were there — either way the file itself is never deleted (a
+// .gitignore may be tracked; deleting it would touch user work).
+export type IgnoreCleanupResult = {
+  readonly action: 'cleaned' | 'absent';
+};
+
+// Shared line-filter for both cleanups: drop every line whose trimmed form is in
+// `owned`, preserving all other lines byte-identically. Returns null when no
+// owned line is present, so callers can report 'absent' without a rewrite.
+const filterOwnedLines = (content: string, owned: ReadonlySet<string>): string | null => {
+  const lines = content.split(/\r?\n/);
+  const kept = lines.filter((line) => !owned.has(line.trim()));
+  if (kept.length === lines.length) {
+    return null;
+  }
+  // Rewrite with LF endings and a single trailing newline, mirroring the ensure
+  // writers. A file left with no lines becomes empty ('') but stays on disk.
+  while (kept.at(-1) === '') {
+    kept.pop();
+  }
+  return kept.length === 0 ? '' : `${kept.join('\n')}\n`;
+};
+
+// Applies filterOwnedLines to a file on disk: ENOENT and no-owned-line are both
+// the successful 'absent' no-op (cleanup never creates or deletes files).
+const cleanOwnedLines = async (
+  filePath: string,
+  owned: ReadonlySet<string>,
+): Promise<Result<IgnoreCleanupResult, GitignoreEnsureError>> => {
+  let content: string;
+  try {
+    content = await fs.readFile(filePath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return ok({ action: 'absent' });
+    }
+    return err({ message: `could not read ${filePath}: ${errorMessage(error)}`, cause: error });
+  }
+  const next = filterOwnedLines(content, owned);
+  if (next === null) {
+    return ok({ action: 'absent' });
+  }
+  try {
+    await fs.writeFile(filePath, next, 'utf8');
+  } catch (error) {
+    return err({ message: `could not write ${filePath}: ${errorMessage(error)}`, cause: error });
+  }
+  return ok({ action: 'cleaned' });
+};
+
+// The inverse of ensureGitignoreEntry: remove ONLY the canonical `/dir/` line rw
+// writes. The laxer `dir/` variant that ensure ACCEPTS but never writes is user
+// content and survives, as does everything else in the file.
+export const removeGitignoreEntry = (
+  projectRoot: string,
+  worktreesDir: string,
+): Promise<Result<IgnoreCleanupResult, GitignoreEnsureError>> =>
+  cleanOwnedLines(path.join(projectRoot, '.gitignore'), new Set([`/${worktreesDir}/`]));
+
+// The inverse of ensureExcludeEntries: remove exactly the given patterns from the
+// shared info/exclude, preserving git's stock comments and any user patterns.
+export const removeExcludeEntries = (
+  gitCommonDir: string,
+  patterns: readonly string[],
+): Promise<Result<IgnoreCleanupResult, GitignoreEnsureError>> =>
+  cleanOwnedLines(path.join(gitCommonDir, 'info', 'exclude'), new Set(patterns));
+
 export type DepsInstallResult = {
   readonly stack: Stack;
   readonly action: 'installed' | 'skipped';
